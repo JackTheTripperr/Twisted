@@ -1,5 +1,10 @@
 # TWISTED
 
+Initial commit is a Fable 5.1 1-shot, exact prompt:
+
+> Make a reactjs + vite, and launch  it on port 3004. A game called "Twisted" where you navigate your mouse cursor through a maze, except all mouse inputs are reversed. When the cursor touches a wall, the player "dies" and starts from level 1. Make it super creative and visually breathtaking. The visuals should take on a retro neon cyberpunk style, and the audio should blend 80's synthwave aesthetics with modern electronic production (inspired by "Total Nuclear Annihilation" by Scott Danesi). 
+>
+>There should be 20 levels, each level progressing in difficulty (narrow passages, complex turns to navigate, tight corridors, etc.). As the difficulty increases, introduce mechanics that make the gameplay more challenging for a short period...mouse movements return to normal, cursor speed change, cursor size increase). The visuals should pulse and flash in time with the soundtrack.
 A neon cyberpunk maze game where your mouse is lying to you. Every movement is
 inverted, the walls are lethal, and dying sends you back to level 01.
 
