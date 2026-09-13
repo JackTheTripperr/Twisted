@@ -1,5 +1,7 @@
 # TWISTED
 
+Play at https://twisted-two.vercel.app/
+
 Initial commit is a Fable 5.1 1-shot, exact prompt:
 
 > Make a reactjs + vite, and launch  it on port 3004. A game called "Twisted" where you navigate your mouse cursor through a maze, except all mouse inputs are reversed. When the cursor touches a wall, the player "dies" and starts from level 1. Make it super creative and visually breathtaking. The visuals should take on a retro neon cyberpunk style, and the audio should blend 80's synthwave aesthetics with modern electronic production (inspired by "Total Nuclear Annihilation" by Scott Danesi). 
