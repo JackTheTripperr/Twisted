@@ -17,6 +17,8 @@ A neon cyberpunk obstacle course where your mouse is lying to you. Every
 movement is inverted, everything neon is lethal, and dying sends you back to
 level 01 unless you are carrying a reboot core.
 
+Inspired by Mobasher Iqbal's [Reverse](https://www.addictinggames.com/puzzle/reverse)
+
 ## Run it
 
 ```bash
