@@ -20,6 +20,8 @@ export interface Course {
   obstacles: ObstacleDef[];
   zones: ZoneDef[];
   pickup?: Vec;
+  /** signal fragment collectible (one per level) */
+  fragment?: Vec;
   start: Vec;
   goal: Vec;
   goalR: number;
@@ -82,6 +84,7 @@ function l01(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1150, CY),
+    fragment: v(640, 150),
     goalR: 26,
   };
 }
@@ -94,6 +97,7 @@ function l02(): Course {
     zones: [],
     start: v(130, 190),
     goal: v(1150, 578),
+    fragment: v(1000, 290),
     goalR: 26,
   };
 }
@@ -106,6 +110,7 @@ function l03(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1160, CY),
+    fragment: v(700, 302),
     goalR: 26,
   };
 }
@@ -121,6 +126,7 @@ function l04(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1160, CY),
+    fragment: v(550, 252),
     goalR: 26,
   };
 }
@@ -149,6 +155,7 @@ function l05(): Course {
     pickup: v(1100, 161),
     start: v(130, CY),
     goal: v(1160, CY),
+    fragment: v(650, 312),
     goalR: 26,
   };
 }
@@ -160,6 +167,7 @@ function l06(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1160, CY),
+    fragment: v(450, 322),
     goalR: 26,
   };
 }
@@ -176,6 +184,7 @@ function l07(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(700, CY),
     goalR: 24,
   };
 }
@@ -192,6 +201,7 @@ function l08(): Course {
     ],
     start: v(130, CY),
     goal: v(1185, CY),
+    fragment: v(662, 394),
     goalR: 22,
   };
 }
@@ -213,6 +223,7 @@ function l09(): Course {
     ],
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(900, 318),
     goalR: 24,
   };
 }
@@ -225,6 +236,7 @@ function l10(): Course {
     pickup: v(640, 195),
     start: v(130, CY),
     goal: v(1160, CY),
+    fragment: v(640, 560),
     goalR: 24,
   };
 }
@@ -250,6 +262,7 @@ function l11(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(680, 365),
     goalR: 24,
   };
 }
@@ -261,6 +274,7 @@ function l12(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(720, CY),
+    fragment: v(480, 250),
     goalR: 15,
   };
 }
@@ -289,6 +303,7 @@ function l13(): Course {
     ],
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(790, 310),
     goalR: 24,
   };
 }
@@ -308,6 +323,7 @@ function l14(): Course {
     zones: [{ kind: 'DRAG', poly: rectPoly(320, 319, 360, 130), entry: gate(680, 319, 680, 449), exit: gate(320, 319, 320, 449), pressure: 'none' }],
     start: v(130, 160),
     goal: v(1170, 600),
+    fragment: v(500, 337),
     goalR: 24,
   };
 }
@@ -330,6 +346,7 @@ function l15(): Course {
     pickup: v(1100, 210),
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(675, CY),
     goalR: 24,
   };
 }
@@ -357,6 +374,7 @@ function l16(): Course {
     zones: [],
     start: block.start,
     goal: block.exit,
+    fragment: sol[3],
     goalR: Math.min(22, block.cell * 0.3),
   };
 }
@@ -377,6 +395,7 @@ function l17(): Course {
     ],
     start: v(130, CY),
     goal: v(1170, CY),
+    fragment: v(640, 236),
     goalR: 24,
   };
 }
@@ -398,6 +417,7 @@ function l18(): Course {
     zones: [],
     start: v(130, CY),
     goal: v(1185, CY),
+    fragment: v(600, CY),
     goalR: 22,
   };
 }
@@ -424,6 +444,7 @@ function l19(): Course {
     ],
     start: v(130, CY),
     goal: center,
+    fragment: v(588, 300),
     goalR: 14,
   };
 }
@@ -452,6 +473,7 @@ function l20(): Course {
     pickup: v(1095, 196),
     start: v(130, 170),
     goal: v(1180, 598),
+    fragment: v(700, CY),
     goalR: 24,
   };
 }

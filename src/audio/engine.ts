@@ -177,6 +177,12 @@ export class AudioEngine {
   private driveShaper!: WaveShaperNode;
   private droneGain: GainNode | null = null;
   private rumbleGain: GainNode | null = null;
+  private musicGain!: GainNode;
+  private surgeFilter!: BiquadFilterNode;
+  private surgeHum!: GainNode;
+  tempoMult = 1;
+  private musicVol = 0.85;
+  private sfxVol = 0.9;
 
   private timer: number | null = null;
   private step = 0;
@@ -260,7 +266,15 @@ export class AudioEngine {
     highShelf.frequency.value = 6500;
     highShelf.gain.value = -3.5;
 
-    this.deathFilter.connect(this.comp);
+    this.surgeFilter = c.createBiquadFilter();
+    this.surgeFilter.type = 'lowpass';
+    this.surgeFilter.frequency.value = 20000;
+    this.surgeFilter.Q.value = 0.8;
+    this.musicGain = c.createGain();
+    this.musicGain.gain.value = this.musicVol;
+    this.deathFilter.connect(this.surgeFilter);
+    this.surgeFilter.connect(this.musicGain);
+    this.musicGain.connect(this.comp);
     this.comp.connect(lowShelf);
     lowShelf.connect(highShelf);
     highShelf.connect(this.master);
@@ -288,7 +302,7 @@ export class AudioEngine {
     this.leadBus.connect(this.duck);
 
     this.sfxBus = c.createGain();
-    this.sfxBus.gain.value = 0.9;
+    this.sfxBus.gain.value = this.sfxVol;
     this.sfxBus.connect(this.comp); // SFX bypass the death filter so they stay crisp
 
     const conv = c.createConvolver();
@@ -393,6 +407,22 @@ export class AudioEngine {
     rlp.connect(this.rumbleGain);
     this.rumbleGain.connect(this.sfxBus);
     rsrc.start();
+
+    // surge (time dilation) hum: a low detuned pair that swells while time is stretched
+    this.surgeHum = c.createGain();
+    this.surgeHum.gain.value = 0;
+    for (const [freq, det] of [
+      [82.4, -5],
+      [123.5, 6],
+    ]) {
+      const o = c.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = freq;
+      o.detune.value = det;
+      o.connect(this.surgeHum);
+      o.start();
+    }
+    this.surgeHum.connect(this.sfxBus);
   }
 
   private makeImpulse(seconds: number, decay: number): AudioBuffer {
@@ -416,9 +446,8 @@ export class AudioEngine {
     this.level = level;
     this.layers = layersFor(level, mode);
     this.intensity = mode === 'title' ? 0.15 : mode === 'win' ? 1 : Math.min(1, 0.25 + (level - 1) / 19);
-    if (mode === 'title') this.targetBpm = 126;
-    else if (mode === 'win') this.targetBpm = 132;
-    else this.targetBpm = 126 + Math.min(4, Math.floor((level - 1) / 4)) * 4;
+    const base = mode === 'title' ? 126 : mode === 'win' ? 132 : 126 + Math.min(4, Math.floor((level - 1) / 4)) * 4;
+    this.targetBpm = Math.round(base * this.tempoMult);
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const f = this.deathFilter.frequency;
@@ -436,6 +465,32 @@ export class AudioEngine {
     this.master.gain.cancelScheduledValues(t);
     this.master.gain.setValueAtTime(this.master.gain.value, t);
     this.master.gain.linearRampToValueAtTime(m ? 0 : 0.85, t + 0.1);
+  }
+
+  setTempoMult(m: number) {
+    this.tempoMult = m;
+    this.setMode(this.mode, this.level);
+  }
+
+  setVolumes(music: number, sfx: number) {
+    this.musicVol = music;
+    this.sfxVol = sfx;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.musicGain.gain.setTargetAtTime(music, t, 0.05);
+    this.sfxBus.gain.setTargetAtTime(sfx, t, 0.05);
+  }
+
+  /** Time dilation: muffle the track and swell the hum. */
+  setSurge(on: boolean) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.surgeFilter.frequency.cancelScheduledValues(t);
+    this.surgeFilter.frequency.setValueAtTime(this.surgeFilter.frequency.value, t);
+    this.surgeFilter.frequency.exponentialRampToValueAtTime(on ? 520 : 20000, t + (on ? 0.12 : 0.25));
+    this.surgeHum.gain.setTargetAtTime(on ? 0.16 : 0, t, on ? 0.08 : 0.15);
+    if (on) this.blip(t, 1760, 0.12, 0.12, 'sine');
+    else this.blip(t, 880, 0.1, 0.1, 'sine');
   }
 
   // ---------------------------------------------------------------- clock
@@ -1245,6 +1300,74 @@ export class AudioEngine {
       cg.connect(rs);
       rs.connect(this.reverbSend);
     }
+  }
+
+  sfxGraze(combo: number) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    const f = 880 * Math.pow(2, Math.min(7, combo - 1) / 12);
+    const { g } = this.blip(t, f, 0.09, 0.16, 'triangle');
+    const ds = c.createGain();
+    ds.gain.value = 0.35;
+    g.connect(ds);
+    ds.connect(this.delaySend);
+    if (combo >= 4) this.blip(t + 0.03, f * 2, 0.06, 0.06, 'sine');
+  }
+
+  sfxComboLost() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.blip(t, 520, 0.07, 0.1, 'square');
+    this.blip(t + 0.08, 380, 0.12, 0.1, 'square');
+  }
+
+  sfxFragment() {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    [88, 95].forEach((m, i) => {
+      const { g } = this.blip(t + i * 0.06, mtof(m), 0.28, 0.12, 'sine');
+      const rs = c.createGain();
+      rs.gain.value = 0.5;
+      g.connect(rs);
+      rs.connect(this.reverbSend);
+    });
+  }
+
+  sfxAchievement() {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    [76, 79, 83, 88].forEach((m, i) => {
+      const { g } = this.blip(t + i * 0.09, mtof(m), 0.5, 0.11, 'triangle');
+      const rs = c.createGain();
+      rs.gain.value = 0.7;
+      g.connect(rs);
+      rs.connect(this.reverbSend);
+      g.connect(this.delaySend);
+    });
+  }
+
+  sfxMenu(kind: 'hover' | 'click' | 'back') {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    if (kind === 'hover') this.blip(t, 1400, 0.04, 0.05, 'sine');
+    else if (kind === 'click') {
+      this.blip(t, 900, 0.06, 0.12, 'square');
+      this.blip(t + 0.05, 1350, 0.1, 0.1, 'square');
+    } else {
+      this.blip(t, 700, 0.06, 0.1, 'square');
+      this.blip(t + 0.05, 480, 0.1, 0.1, 'square');
+    }
+  }
+
+  /** New sector: crash and a short riser. */
+  sfxSector() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.crash(t, 0.8);
+    this.riser(t, 1.2);
   }
 
   // ---------------------------------------------------------------- beat query

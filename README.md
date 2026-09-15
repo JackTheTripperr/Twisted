@@ -9,7 +9,9 @@ Initial commit is a Fable 5.1 1-shot, exact prompt:
 >There should be 20 levels, each level progressing in difficulty (narrow passages, complex turns to navigate, tight corridors, etc.). As the difficulty increases, introduce mechanics that make the gameplay more challenging for a short period...mouse movements return to normal, cursor speed change, cursor size increase). The visuals should pulse and flash in time with the soundtrack.
 
 Version 2 turned the mazes into obstacle courses, made the glitch modifiers
-spatial (you cannot wait them out), and added reboot cores.
+spatial gate nodes, and added reboot cores. Version 3 added the graze and surge
+systems, scoring and ranks, practice / daily / overdrive modes, a persistent
+profile with achievements, ghosts, a story layer, and a full menu.
 
 A neon cyberpunk obstacle course where your mouse is lying to you. Every
 movement is inverted, everything neon is lethal, and dying sends you back to
@@ -28,23 +30,52 @@ The dev server is pinned to **http://localhost:3004** (`--strictPort`).
 
 ## How to play
 
-- Click **JACK IN** on the title screen. The game grabs the pointer (Pointer Lock)
+- Pick **JACK IN** on the title menu. The game grabs the pointer (Pointer Lock)
   and hides the real cursor; the neon orb is you.
-- Every level opens on its name and waits for a click, so you can read the course
-  and the rhythm before the clock starts.
+- Every level opens on a transmission from the WARDEN and waits for a click.
 - Mouse input is **reversed on both axes**. Push right, the orb goes left.
-- Guide the orb from the cyan start pad to the magenta portal.
-- Touch a wall, a moving bar, a beam, a ring, a seeker, or the static of a
-  collapsing hallway and you die.
-- **Esc** releases the mouse (pauses, the level restarts from its pad). **M** mutes.
-- Best level reached and fastest full clear are stored in `localStorage`.
+- Guide the orb from the cyan start pad to the magenta portal. Touch a wall, a
+  moving bar, a beam, a ring, a seeker, or the static of a collapsing hallway
+  and you die.
+- **Graze**: skim a hazard without touching it to score points, build a combo
+  (×2 to ×8, decays if you play safe) and refill **Surge**.
+- **Surge**: hold the mouse button to stretch time. Obstacles, phantoms and
+  collapsing walls slow to 30 %; your cursor does not. The meter only refills by
+  grazing.
+- Each level hides one **signal fragment** (score, and a collection to complete)
+  and every fifth level hides a **reboot core** off the route.
+- **Esc** releases the mouse and opens the pause menu. **M** mutes.
+
+## Modes
+
+| Mode | What it is |
+| --- | --- |
+| **The Run** | All 20 sectors, one life, reboot cores as your only safety net. Clearing it unlocks Overdrive. |
+| **Practice** | Any sector you have reached in a run. Deaths restart the level. Best times save a **ghost** you can race. |
+| **Daily Twist** | A seeded 8-level gauntlet that changes every day, with mutators (mirrored, faster tempo, faster phantoms, gate overrides). One best score per day. |
+| **Overdrive** | New Game+: every level mirrored, the soundtrack 12 % faster (obstacles follow the beat, so they are faster too), phantoms 25 % faster. |
+
+## Scoring and records
+
+Each cleared level scores a base amount, a time bonus for beating **par**, graze
+points times combo, fragment and core bonuses, and earns an **S / A / B / C**
+rank from its time. Clearing the run adds a bonus, and a deathless clear adds
+another. Deaths without a core end the run with a recap: what killed you, how far
+you got, and a word from the WARDEN. Results can be copied as a shareable
+emoji grid.
+
+The profile (saved in this browser) tracks runs, deaths, deepest level, high
+score, fastest clear, grazes, max combo, fragments, per-level bests, run
+history, the daily best, and 19 **achievements** that pop as toasts in play.
+**Options** cover mouse sensitivity, music and SFX volume, screen shake, full or
+reduced flashing, scanlines, and the best-run ghost.
 
 ## The 20 sectors
 
 Every course is hand-authored in `src/game/courses.ts` and fixed between runs,
 so layouts can be learned. All obstacle motion is expressed in **beats**, and the
-tempo climbs from 126 to 142 BPM across the five zones, so everything gets faster
-as the soundtrack escalates.
+tempo climbs from 126 to 142 BPM across the five sectors, so everything gets
+faster as the soundtrack escalates.
 
 | # | Level | New mechanic |
 | --- | --- | --- |
@@ -93,8 +124,15 @@ hallway (level 14) and a decaying signal bar (level 19).
 Levels 05, 10, 15 and 20 each hide one **reboot core**, always off the main
 route and behind extra hazards. Cores stack up to three and carry forward. Dying
 with a core consumes it and resumes the same level from its start pad (that
-level's core does not reappear). Dying without one restarts from level 01 with
-nothing.
+level's core does not reappear). Dying without one ends the run.
+
+## Story
+
+The WARDEN, the security intelligence of the system you were couriering
+through, hijacked your neural link and inverted the interface. Each sector is a
+layer of its core; the phantoms are cut from your own movement logs; the reboot
+cores are cached copies of your unhijacked self. It talks to you at every level,
+briefs you at every sector, and has something to say about every way you die.
 
 ## Audio
 
@@ -107,10 +145,9 @@ lead. The track runs in A minor through two alternating 8-bar sections (Am F Dm
 E / Am F Bb E and Am Em F Dm / Am G Bb E) with a breakdown every fourth phrase
 where the drums drop to a sustained sub and swell back in. The arrangement
 thickens with the level (arp at 5, lead at 9, drive and syncopation at 13,
-risers at 17), and the master gets a low-shelf boost and a high-shelf cut. A
-phantom adds a proximity drone; a collapsing hallway adds a rumble. Death slams
-a low-pass filter over the mix; a reboot dips it and powers back up; level
-clears fire a rising run.
+risers at 17), and the master gets a low-shelf boost and a high-shelf cut.
+Surge muffles the track and swells a hum; a phantom adds a proximity drone; a
+collapsing hallway adds a rumble; grazes chirp up the combo; achievements chime.
 
 Every scheduled kick, clap and hat is timestamped, and the renderer reads that
 clock every frame, so the grid, walls, obstacles, bloom, portal and HUD pulse on
@@ -119,19 +156,20 @@ the beat. Pistons punch on the kick and doors slam on the bar.
 ## Visuals
 
 Canvas 2D at a logical 1280×720, scaled to the window. Static walls are
-pre-rendered per level into a glow layer and a core layer; obstacles, zones,
-gates, the phantom and the reboot core are drawn every frame. The scene is
-composited through a cheap down-sampled bloom, per-channel chromatic aberration
-(SVG colour matrices via `ctx.filter`), glitch slice displacement, screen shake
-and flashes, under CSS scanlines and a vignette.
+pre-rendered per level into a glow layer and a core layer; obstacles, gates, the
+phantom, fragments, cores, the ghost and score popups are drawn every frame.
+The scene is composited through a cheap down-sampled bloom, per-channel
+chromatic aberration (SVG colour matrices via `ctx.filter`), glitch slice
+displacement, screen shake, flashes, a cinematic zoom (death cam, portal warp,
+level entry) and a cool time-dilation tint, under CSS scanlines and a vignette.
 
 ## Dev tools
 
 In dev builds (`npm run dev`):
 
-- `?level=N` starts a run at level N.
+- `?level=N` starts the run at level N.
 - **G** toggles ghost mode (nothing kills you), **N** / **P** jump to the next /
-  previous level.
+  previous level of the current run.
 - Each level load runs a static reachability check and warns in the console if
   the goal or the reboot core cannot be reached through the walls.
 - The live game instance is exposed as `window.__twisted`.
@@ -140,14 +178,19 @@ In dev builds (`npm run dev`):
 
 ```
 src/
-  audio/engine.ts     procedural music + SFX + beat clock
-  game/engine.ts      state machine, movement, gates, phantom, reboots
-  game/entities.ts    obstacle catalog: definitions, evaluation, collision
-  game/courses.ts     the 20 hand-authored courses
-  game/levels.ts      level names, zones, palettes, modifier info
-  game/maze.ts        maze carving (level 16), capsule collision helpers
-  game/reach.ts       dev reachability check
-  game/input.ts       pointer-lock input with fallback
-  render/renderer.ts  canvas rendering and post-processing
-  ui/                 React HUD, title and overlays
+  audio/engine.ts       procedural music + SFX + beat clock
+  game/engine.ts        state machine, modes, movement, gates, graze, surge, records
+  game/entities.ts      obstacle catalog: definitions, evaluation, collision
+  game/courses.ts       the 20 hand-authored courses (+ fragments)
+  game/modes.ts         daily plan, Overdrive mutators, course mirroring
+  game/score.ts         par times, scoring, ranks
+  game/story.ts         transmissions, briefings, taunts, ending
+  game/achievements.ts  achievement definitions
+  game/profile.ts       persistent profile + options
+  game/levels.ts        level names, sectors, palettes, gate info
+  game/maze.ts          maze carving (level 16), capsule collision helpers
+  game/reach.ts         dev reachability check
+  game/input.ts         pointer-lock input with fallback
+  render/renderer.ts    canvas rendering and post-processing
+  ui/                   React title menu, panels, HUD, overlays, summaries
 ```
