@@ -542,27 +542,28 @@ body,
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* intro */
+/* intro: holds until the player clicks */
 .overlay.intro {
   justify-content: flex-start;
   padding-top: 118px;
-  animation: introFade 1.25s forwards;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.15) 40%, rgba(0, 0, 0, 0) 60%);
+  animation: introIn 0.45s cubic-bezier(0.2, 1.2, 0.3, 1);
 }
-@keyframes introFade {
+@keyframes introIn {
   0% {
     opacity: 0;
-    transform: translateY(-10px);
-  }
-  12% {
-    opacity: 1;
-    transform: none;
-  }
-  75% {
-    opacity: 1;
+    transform: translateY(-14px);
+    filter: blur(6px);
   }
   100% {
-    opacity: 0;
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
   }
+}
+.intro .cta {
+  margin-top: 22px;
+  font-size: 20px;
 }
 .intro-zone {
   font-size: 11px;
@@ -578,28 +579,6 @@ body,
   font-size: 18px;
   letter-spacing: 0.5em;
   color: var(--primary);
-}
-.intro-bar {
-  margin-top: 10px;
-  width: 260px;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-.intro-bar span {
-  display: block;
-  height: 100%;
-  background: var(--primary);
-  box-shadow: 0 0 10px var(--primary);
-  animation: fill 1.15s linear forwards;
-}
-@keyframes fill {
-  from {
-    width: 0;
-  }
-  to {
-    width: 100%;
-  }
 }
 
 /* death */
@@ -721,4 +700,77 @@ body,
 }
 .paused .cta {
   margin-top: 16px;
+}
+
+/* ------------------------------------------------------------ v2: reboots, zones, badges */
+
+.reboots {
+  display: flex;
+  gap: 5px;
+  margin-top: 3px;
+}
+.slot {
+  width: 16px;
+  height: 18px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.slot.on {
+  background: #ffffff;
+  box-shadow:
+    0 0 8px #ffffff,
+    0 0 calc(6px + 14px * var(--kick)) var(--primary);
+}
+.core-badge {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: #ffffff;
+  text-shadow:
+    0 0 6px #ffffff,
+    0 0 14px var(--primary);
+  animation: blink 1.4s steps(2, start) infinite;
+}
+.ghost-badge {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: #3dff8f;
+  text-shadow: 0 0 8px #3dff8f;
+}
+.mod-fill.decay {
+  width: calc(var(--decay) * 100%);
+}
+.mod-active .mod-name {
+  animation: none;
+}
+.intro-hint {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.75);
+}
+.intro-core {
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: #ffffff;
+  text-shadow:
+    0 0 6px #ffffff,
+    0 0 16px var(--primary);
+  animation: blink 0.8s steps(2, start) infinite;
+}
+.overlay.death.reboot {
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.6));
+  --primary: #ffffff;
+  --secondary: var(--accent);
+}
+.overlay.death.reboot .death-sub {
+  color: rgba(255, 255, 255, 0.85);
+}
+.rules li b.white {
+  color: #ffffff;
 }

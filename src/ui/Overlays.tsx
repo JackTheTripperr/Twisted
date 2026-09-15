@@ -14,25 +14,33 @@ export function Overlays({ snap }: { snap: Snapshot }) {
   switch (snap.phase) {
     case 'intro':
       return (
-        <div className="overlay intro" key={`intro-${snap.level}`}>
+        <div className="overlay intro" key={`intro-${snap.level}-${snap.deaths}`}>
           <div className="intro-zone">{snap.zoneName}</div>
           <div className="intro-level">
             <Glitch text={`LEVEL ${String(snap.level).padStart(2, '0')}`} />
           </div>
           <div className="intro-name">{snap.levelName}</div>
-          <div className="intro-bar">
-            <span />
-          </div>
+          <div className="cta blink">CLICK TO START</div>
         </div>
       );
     case 'dying':
-      return (
+      return snap.rebootUsed ? (
+        <div className="overlay death reboot" key={`death-${snap.deaths}`}>
+          <div className="death-title">
+            <Glitch text="REBOOT CONSUMED" />
+          </div>
+          <div className="death-sub">
+            RESUMING LEVEL {String(snap.level).padStart(2, '0')} · {snap.reboots} REBOOT{snap.reboots === 1 ? '' : 'S'} LEFT
+          </div>
+          <div className="death-count">DEATHS {String(snap.deaths).padStart(2, '0')}</div>
+        </div>
+      ) : (
         <div className="overlay death" key={`death-${snap.deaths}`}>
           <div className="death-title">
             <Glitch text="SIGNAL LOST" className="glitch-hard" />
           </div>
           <div className="death-sub">
-            TERMINATED ON LEVEL {String(snap.lastDeathLevel).padStart(2, '0')} · REBOOTING TO LEVEL 01
+            TERMINATED ON LEVEL {String(snap.lastDeathLevel).padStart(2, '0')} · NO REBOOTS · RESTARTING FROM LEVEL 01
           </div>
           <div className="death-count">DEATHS {String(snap.deaths).padStart(2, '0')}</div>
         </div>
@@ -44,7 +52,7 @@ export function Overlays({ snap }: { snap: Snapshot }) {
             <Glitch text={snap.level >= LEVEL_COUNT ? 'SYSTEM LIBERATED' : 'SECTOR CLEARED'} />
           </div>
           <div className="clear-sub">
-            {snap.level >= LEVEL_COUNT ? 'ALL 20 LEVELS UNTWISTED' : `NEXT · LEVEL ${String(snap.level + 1).padStart(2, '0')}`}
+            {snap.level >= LEVEL_COUNT ? 'ALL 20 SECTORS UNTWISTED' : `NEXT · LEVEL ${String(snap.level + 1).padStart(2, '0')}`}
           </div>
         </div>
       );
@@ -78,7 +86,7 @@ export function Overlays({ snap }: { snap: Snapshot }) {
           <div className="paused-title">
             <Glitch text="LINK SEVERED" />
           </div>
-          <div className="paused-sub">THE MOUSE ESCAPED · CLICK TO RE-ENTER LEVEL {String(snap.level).padStart(2, '0')}</div>
+          <div className="paused-sub">THE MOUSE ESCAPED · LEVEL {String(snap.level).padStart(2, '0')} RESTARTS FROM ITS START PAD</div>
           <div className="cta blink">CLICK TO RESUME</div>
         </div>
       );

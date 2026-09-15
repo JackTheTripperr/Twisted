@@ -29,7 +29,13 @@ export default function App() {
     onResize();
     window.addEventListener('resize', onResize);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'm' || e.key === 'M') setMuted(game.toggleMute());
+      const k = e.key.toLowerCase();
+      if (k === 'm') setMuted(game.toggleMute());
+      if (!import.meta.env.DEV) return;
+      // dev-only playtesting keys
+      if (k === 'g') game.toggleGhost();
+      if (k === 'n') game.devJump(1);
+      if (k === 'p') game.devJump(-1);
     };
     window.addEventListener('keydown', onKey);
     return () => {
@@ -45,6 +51,7 @@ export default function App() {
     const g = gameRef.current;
     if (!g || !snap) return;
     if (snap.phase === 'title') void g.begin();
+    else if (snap.phase === 'intro') g.startPlay();
     else if (snap.phase === 'paused') void g.resume();
     else if (snap.phase === 'won') void g.restart();
   }, [snap]);

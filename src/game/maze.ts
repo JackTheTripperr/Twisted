@@ -1,6 +1,5 @@
 import { mulberry32, hashSeed, type Rng } from './rng';
-import type { LevelDef } from './levels';
-import type { LevelGeometry, Segment, Vec } from './types';
+import type { Rect, Segment, Vec } from './types';
 
 // wall bits per cell
 const N = 1, E = 2, S = 4, W = 8;
@@ -117,55 +116,62 @@ interface Candidate {
 }
 
 /** Generate several mazes and keep the one whose left→right solution is the longest and twistiest. */
-function bestMaze(def: LevelDef, seed: number, tries: number): Candidate {
+function bestMaze(cols: number, rows: number, straightBias: number, seed: number, tries: number): Candidate {
   let best: Candidate | null = null;
   for (let t = 0; t < tries; t++) {
-    const rng = mulberry32(hashSeed(seed, t, def.level));
-    const maze = carve(def.cols, def.rows, def.straightBias, rng);
-    const start = Math.floor(rng() * def.rows) * def.cols; // left column
+    const rng = mulberry32(hashSeed(seed, t, cols * 31 + rows));
+    const maze = carve(cols, rows, straightBias, rng);
+    const start = Math.floor(rng() * rows) * cols; // left column
     const { dist, parent } = bfs(maze, start);
     let end = -1;
     let bestD = -1;
-    for (let y = 0; y < def.rows; y++) {
-      const c = y * def.cols + (def.cols - 1);
+    for (let y = 0; y < rows; y++) {
+      const c = y * cols + (cols - 1);
       if (dist[c] > bestD) {
         bestD = dist[c];
         end = c;
       }
     }
     const path = pathTo(parent, end);
-    const score = path.length + countTurns(path, def.cols) * 1.5;
+    const score = path.length + countTurns(path, cols) * 1.5;
     if (!best || score > best.score) best = { maze, start, end, path, score };
   }
   return best!;
 }
 
-export interface Area {
-  x: number;
-  y: number;
+export interface MazeBlock {
+  segs: Segment[];
+  start: Vec;
+  exit: Vec;
+  /** pixel centres of the solution path cells */
+  solution: Vec[];
+  cell: number;
+  /** origin of the block */
+  ox: number;
+  oy: number;
   w: number;
   h: number;
 }
 
-export function buildGeometry(def: LevelDef, seed: number, area: Area): LevelGeometry {
-  const cand = bestMaze(def, seed, 14);
+/** Build the wall segments of a maze fitted inside `area`. */
+export function mazeSegments(cols: number, rows: number, seed: number, area: Rect, wallT: number, straightBias = 0.3): MazeBlock {
+  const cand = bestMaze(cols, rows, straightBias, seed, 14);
   const m = cand.maze;
-  const cell = Math.floor(Math.min(area.w / def.cols, area.h / def.rows));
-  const w = cell * def.cols;
-  const h = cell * def.rows;
+  const cell = Math.floor(Math.min(area.w / cols, area.h / rows));
+  const w = cell * cols;
+  const h = cell * rows;
   const ox = Math.round(area.x + (area.w - w) / 2);
   const oy = Math.round(area.y + (area.h - h) / 2);
-  const ht = def.wallT / 2;
+  const ht = wallT / 2;
   const segs: Segment[] = [];
 
-  // Horizontal wall lines (y = 0..rows). Use N walls of row y, S walls for the bottom edge.
-  for (let y = 0; y <= def.rows; y++) {
+  for (let y = 0; y <= rows; y++) {
     let runStart = -1;
-    for (let x = 0; x <= def.cols; x++) {
+    for (let x = 0; x <= cols; x++) {
       let has = false;
-      if (x < def.cols) {
-        if (y < def.rows) has = (m.walls[y * def.cols + x] & N) !== 0;
-        else has = (m.walls[(y - 1) * def.cols + x] & S) !== 0;
+      if (x < cols) {
+        if (y < rows) has = (m.walls[y * cols + x] & N) !== 0;
+        else has = (m.walls[(y - 1) * cols + x] & S) !== 0;
       }
       if (has && runStart < 0) runStart = x;
       if (!has && runStart >= 0) {
@@ -174,14 +180,13 @@ export function buildGeometry(def: LevelDef, seed: number, area: Area): LevelGeo
       }
     }
   }
-  // Vertical wall lines (x = 0..cols). Use W walls of column x, E walls for the right edge.
-  for (let x = 0; x <= def.cols; x++) {
+  for (let x = 0; x <= cols; x++) {
     let runStart = -1;
-    for (let y = 0; y <= def.rows; y++) {
+    for (let y = 0; y <= rows; y++) {
       let has = false;
-      if (y < def.rows) {
-        if (x < def.cols) has = (m.walls[y * def.cols + x] & W) !== 0;
-        else has = (m.walls[y * def.cols + (x - 1)] & E) !== 0;
+      if (y < rows) {
+        if (x < cols) has = (m.walls[y * cols + x] & W) !== 0;
+        else has = (m.walls[y * cols + (x - 1)] & E) !== 0;
       }
       if (has && runStart < 0) runStart = y;
       if (!has && runStart >= 0) {
@@ -192,54 +197,19 @@ export function buildGeometry(def: LevelDef, seed: number, area: Area): LevelGeo
   }
 
   const centre = (c: number): Vec => ({
-    x: ox + (c % def.cols) * cell + cell / 2,
-    y: oy + ((c / def.cols) | 0) * cell + cell / 2,
+    x: ox + (c % cols) * cell + cell / 2,
+    y: oy + ((c / cols) | 0) * cell + cell / 2,
   });
-  const solution = cand.path.map(centre);
-
-  // Chokepoints: pairs of "teeth" that pinch a passage on the solution path.
-  if (def.chokepoints > 0 && cand.path.length > 6) {
-    const usable = cand.path.length - 4;
-    const opening = def.cursorR * 2 + 11; // guaranteed clearance
-    const toothLen = Math.min(cell * 0.28, Math.max(0, (cell - def.wallT - opening) / 2));
-    if (toothLen > 2) {
-      for (let k = 0; k < def.chokepoints; k++) {
-        const idx = 2 + Math.floor(((k + 0.5) / def.chokepoints) * usable);
-        const a = cand.path[idx];
-        const b = cand.path[idx + 1];
-        const ax = a % def.cols, ay = (a / def.cols) | 0;
-        const bx = b % def.cols, by = (b / def.cols) | 0;
-        if (ay === by) {
-          // horizontal passage: vertical boundary line between the cells
-          const xl = ox + Math.max(ax, bx) * cell;
-          const top = oy + ay * cell;
-          const bottom = top + cell;
-          segs.push({ x1: xl, y1: top, x2: xl, y2: top + toothLen, ht, tooth: true });
-          segs.push({ x1: xl, y1: bottom - toothLen, x2: xl, y2: bottom, ht, tooth: true });
-        } else {
-          const yl = oy + Math.max(ay, by) * cell;
-          const left = ox + ax * cell;
-          const right = left + cell;
-          segs.push({ x1: left, y1: yl, x2: left + toothLen, y2: yl, ht, tooth: true });
-          segs.push({ x1: right - toothLen, y1: yl, x2: right, y2: yl, ht, tooth: true });
-        }
-      }
-    }
-  }
-
   return {
-    cols: def.cols,
-    rows: def.rows,
+    segs,
+    start: centre(cand.start),
+    exit: centre(cand.end),
+    solution: cand.path.map(centre),
     cell,
     ox,
     oy,
     w,
     h,
-    segs,
-    start: centre(cand.start),
-    exit: centre(cand.end),
-    exitR: Math.max(10, Math.min(cell * 0.3, 34)),
-    solution,
   };
 }
 
@@ -273,4 +243,29 @@ export function nearestWall(px: number, py: number, segs: Segment[]): { seg: Seg
     }
   }
   return { seg: best, dist: bd };
+}
+
+/** Ray (origin, unit dir) vs segment; returns the distance along the ray or Infinity. */
+export function rayVsSegment(ox: number, oy: number, dx: number, dy: number, s: Segment): number {
+  const ex = s.x2 - s.x1;
+  const ey = s.y2 - s.y1;
+  const den = dx * ey - dy * ex;
+  if (Math.abs(den) < 1e-9) return Infinity;
+  const fx = s.x1 - ox;
+  const fy = s.y1 - oy;
+  const t = (fx * ey - fy * ex) / den;
+  const u = (fx * dy - fy * dx) / den;
+  if (t < 0 || u < 0 || u > 1) return Infinity;
+  return t;
+}
+
+export function pointInPoly(px: number, py: number, poly: Vec[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }

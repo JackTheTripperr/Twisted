@@ -6,29 +6,59 @@
  */
 
 import type { BeatInfo } from '../audio/engine';
+import type { Course } from '../game/courses';
+import { PLAY } from '../game/courses';
+import type { Clock, Obstacle } from '../game/entities';
+import { pointAlong } from '../game/entities';
 import type { Zone } from '../game/levels';
 import { MODIFIER_INFO } from '../game/levels';
-import type { LevelGeometry, ModifierKind, Phase, Segment, Vec } from '../game/types';
+import type { GateState, Phase, Segment, Vec, ZoneDef, ZoneState } from '../game/types';
 
 export const W = 1280;
 export const H = 720;
-export const AREA = { x: 60, y: 92, w: 1160, h: 584 };
 export const INTRO_T = 1.25;
 export const DEATH_T = 2.0;
+export const REBOOT_T = 1.5;
 export const CLEAR_T = 1.35;
+
+export interface PhantomView {
+  x: number;
+  y: number;
+  r: number;
+  alive: boolean;
+  fade: number;
+  /** seconds since it spawned; harmless while materialising */
+  age: number;
+  trail: Vec[];
+}
+
+export interface PurgeView {
+  poly: Vec[];
+  pos: Vec;
+  dir: Vec;
+  span: number;
+}
 
 export interface GameView {
   phase: Phase;
   phaseT: number;
   level: number;
   zone: Zone;
-  geo: LevelGeometry | null;
+  course: Course | null;
+  obstacles: Obstacle[];
   cursor: { x: number; y: number; r: number };
   vel: Vec;
-  modifier: { kind: ModifierKind; state: 'warn' | 'active'; progress: number } | null;
-  deathPos: Vec | null;
+  activeZone: ZoneDef | null;
+  zoneState: ZoneState | null;
+  gates: GateState[];
+  phantom: PhantomView | null;
+  purge: PurgeView | null;
+  pickupTaken: boolean;
   hasMoved: boolean;
   near: { seg: Segment; d: number }[];
+  ghost: boolean;
+  attract: boolean;
+  clock: Clock;
 }
 
 interface Particle {
@@ -69,10 +99,12 @@ function hexToRgb(hex: string): [number, number, number] {
 
 export function rgba(hex: string, a: number): string {
   const [r, g, b] = hexToRgb(hex);
-  return `rgba(${r},${g},${b},${a.toFixed(3)})`;
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
 }
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const RED = '#ff2d55';
+const TAU = Math.PI * 2;
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -85,6 +117,9 @@ export class Renderer {
   private bloom: HTMLCanvasElement;
   private bctx: CanvasRenderingContext2D;
   private filterOK: boolean;
+  private noise: HTMLCanvasElement;
+  private noisePattern: CanvasPattern | null = null;
+  private hatch: HTMLCanvasElement;
 
   private particles: Particle[] = [];
   private trail: { x: number; y: number; t: number }[] = [];
@@ -102,8 +137,9 @@ export class Renderer {
   private lastStep = -1;
   private blackout = 0;
 
-  private geo: LevelGeometry | null = null;
+  private walls: Segment[] = [];
   private zone: Zone | null = null;
+  private start: Vec = { x: 0, y: 0 };
   private maxReveal = 1;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -116,8 +152,38 @@ export class Renderer {
     this.bloom = document.createElement('canvas');
     this.bctx = this.bloom.getContext('2d')!;
     this.filterOK = 'filter' in this.ctx;
+    // static-noise tile for crush walls / purge waves
+    this.noise = document.createElement('canvas');
+    this.noise.width = 128;
+    this.noise.height = 128;
+    const ng = this.noise.getContext('2d')!;
+    const img = ng.createImageData(128, 128);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const vv = Math.random();
+      const bright = vv > 0.82 ? 255 : vv > 0.5 ? 90 + vv * 80 : 20;
+      img.data[i] = bright;
+      img.data[i + 1] = bright * (0.6 + Math.random() * 0.4);
+      img.data[i + 2] = bright;
+      img.data[i + 3] = 255;
+    }
+    ng.putImageData(img, 0, 0);
+    this.noisePattern = this.sctx.createPattern(this.noise, 'repeat');
+    // hatch tile for zones
+    this.hatch = document.createElement('canvas');
+    this.hatch.width = 16;
+    this.hatch.height = 16;
+    const hg = this.hatch.getContext('2d')!;
+    hg.strokeStyle = 'rgba(255,255,255,0.35)';
+    hg.lineWidth = 1.5;
+    hg.beginPath();
+    hg.moveTo(-4, 20);
+    hg.lineTo(20, -4);
+    hg.moveTo(-4, 4);
+    hg.lineTo(4, -4);
+    hg.moveTo(12, 20);
+    hg.lineTo(20, 12);
+    hg.stroke();
     this.setDpr(Math.min(2, window.devicePixelRatio || 1));
-    // seeded starfield
     let s = 12345;
     const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 110; i++) {
@@ -148,62 +214,59 @@ export class Renderer {
     }
     this.bloom.width = Math.round(W / 4);
     this.bloom.height = Math.round(H / 4);
-    if (this.geo && this.zone) this.buildCache(this.geo, this.zone);
+    if (this.zone) this.buildCache();
   }
 
   // ------------------------------------------------------------------ level cache
 
-  setLevel(geo: LevelGeometry, zone: Zone) {
-    this.geo = geo;
+  setLevel(walls: Segment[], start: Vec, zone: Zone) {
+    this.walls = walls;
     this.zone = zone;
+    this.start = start;
     this.trail.length = 0;
     this.rings.length = 0;
     const corners = [
-      [geo.ox, geo.oy],
-      [geo.ox + geo.w, geo.oy],
-      [geo.ox, geo.oy + geo.h],
-      [geo.ox + geo.w, geo.oy + geo.h],
+      [PLAY.x, PLAY.y],
+      [PLAY.x + PLAY.w, PLAY.y],
+      [PLAY.x, PLAY.y + PLAY.h],
+      [PLAY.x + PLAY.w, PLAY.y + PLAY.h],
     ];
-    this.maxReveal = Math.max(...corners.map(([x, y]) => Math.hypot(x - geo.start.x, y - geo.start.y)));
-    this.buildCache(geo, zone);
+    this.maxReveal = Math.max(...corners.map(([x, y]) => Math.hypot(x - start.x, y - start.y)));
+    this.buildCache();
   }
 
-  private strokeSegs(g: CanvasRenderingContext2D, segs: Segment[], teeth: boolean) {
+  private strokeSegs(g: CanvasRenderingContext2D, segs: Segment[]) {
     g.beginPath();
     for (const s of segs) {
-      if (!!s.tooth !== teeth) continue;
       g.moveTo(s.x1, s.y1);
       g.lineTo(s.x2, s.y2);
     }
     g.stroke();
   }
 
-  private buildCache(geo: LevelGeometry, zone: Zone) {
-    const wallT = geo.segs.length ? geo.segs[0].ht * 2 : 8;
+  private buildCache() {
+    const zone = this.zone!;
+    const segs = this.walls;
+    const wallT = 8;
     const passes: { c: HTMLCanvasElement; fn: (g: CanvasRenderingContext2D) => void }[] = [
       {
         c: this.glow,
         fn: (g) => {
           g.lineCap = 'round';
           g.lineJoin = 'round';
-          for (const [teeth, color] of [
-            [false, zone.primary],
-            [true, zone.secondary],
-          ] as [boolean, string][]) {
-            g.shadowBlur = 0;
-            g.strokeStyle = color;
-            g.globalAlpha = 0.16;
-            g.lineWidth = wallT * 4.2;
-            this.strokeSegs(g, geo.segs, teeth);
-            g.globalAlpha = 0.32;
-            g.lineWidth = wallT * 2.3;
-            this.strokeSegs(g, geo.segs, teeth);
-            g.shadowColor = color;
-            g.shadowBlur = 18 * this.dpr;
-            g.globalAlpha = 0.95;
-            g.lineWidth = wallT;
-            this.strokeSegs(g, geo.segs, teeth);
-          }
+          g.shadowBlur = 0;
+          g.strokeStyle = zone.primary;
+          g.globalAlpha = 0.16;
+          g.lineWidth = wallT * 4.2;
+          this.strokeSegs(g, segs);
+          g.globalAlpha = 0.32;
+          g.lineWidth = wallT * 2.3;
+          this.strokeSegs(g, segs);
+          g.shadowColor = zone.primary;
+          g.shadowBlur = 18 * this.dpr;
+          g.globalAlpha = 0.95;
+          g.lineWidth = wallT;
+          this.strokeSegs(g, segs);
         },
       },
       {
@@ -211,18 +274,13 @@ export class Renderer {
         fn: (g) => {
           g.lineCap = 'round';
           g.lineJoin = 'round';
-          for (const [teeth, color] of [
-            [false, zone.primary],
-            [true, zone.secondary],
-          ] as [boolean, string][]) {
-            g.strokeStyle = color;
-            g.globalAlpha = 1;
-            g.lineWidth = wallT;
-            this.strokeSegs(g, geo.segs, teeth);
-            g.strokeStyle = 'rgba(255,255,255,0.9)';
-            g.lineWidth = Math.max(1.5, wallT * 0.38);
-            this.strokeSegs(g, geo.segs, teeth);
-          }
+          g.strokeStyle = zone.primary;
+          g.globalAlpha = 1;
+          g.lineWidth = wallT;
+          this.strokeSegs(g, segs);
+          g.strokeStyle = 'rgba(255,255,255,0.9)';
+          g.lineWidth = Math.max(1.5, wallT * 0.38);
+          this.strokeSegs(g, segs);
         },
       },
     ];
@@ -254,25 +312,27 @@ export class Renderer {
     this.rings.push({ x, y, t0: this.time, color, speed, width, max });
   }
 
+  private push(p: Omit<Particle, 'max'>) {
+    this.particles.push({ ...p, max: p.life });
+  }
+
   explode(x: number, y: number, colors: string[], count = 150) {
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 60 + Math.random() * 520;
       const shape = Math.random() < 0.3 ? 'line' : Math.random() < 0.5 ? 'square' : 'dot';
-      this.particles.push({
+      this.push({
         x,
         y,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp,
         life: 0.6 + Math.random() * 1.1,
-        max: 0,
         size: 1.5 + Math.random() * 3.5,
         color: colors[(Math.random() * colors.length) | 0],
         g: 260,
         drag: 1.4,
         shape,
       });
-      this.particles[this.particles.length - 1].max = this.particles[this.particles.length - 1].life;
     }
   }
 
@@ -280,20 +340,18 @@ export class Renderer {
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 120 + Math.random() * 380;
-      this.particles.push({
+      this.push({
         x,
         y,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp - 120,
         life: 0.8 + Math.random() * 1.2,
-        max: 0,
         size: 2 + Math.random() * 3,
         color: colors[(Math.random() * colors.length) | 0],
         g: 380,
         drag: 1.1,
         shape: Math.random() < 0.5 ? 'square' : 'dot',
       });
-      this.particles[this.particles.length - 1].max = this.particles[this.particles.length - 1].life;
     }
   }
 
@@ -301,13 +359,12 @@ export class Renderer {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 20 + Math.random() * 60;
-      this.particles.push({
+      this.push({
         x,
         y,
         vx: Math.cos(a) * sp - vx * 0.3,
         vy: Math.sin(a) * sp - vy * 0.3,
         life: 0.25 + Math.random() * 0.35,
-        max: 0.6,
         size: 0.8 + Math.random() * 1.6,
         color,
         g: 0,
@@ -325,11 +382,11 @@ export class Renderer {
     const zone = view.zone;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // beat-edge events
     if (beat.bar !== this.lastBar) {
       this.lastBar = beat.bar;
-      if (view.geo && (view.phase === 'playing' || view.phase === 'title')) {
-        this.ring(view.geo.exit.x, view.geo.exit.y, zone.secondary, 180, 2, 150);
+      if (view.course && (view.phase === 'playing' || view.phase === 'title' || view.phase === 'intro')) {
+        this.ring(view.course.goal.x, view.course.goal.y, zone.secondary, 180, 2, 150);
+        if (view.course.pickup && !view.pickupTaken) this.ring(view.course.pickup.x, view.course.pickup.y, '#ffffff', 140, 1.5, 90);
       }
     }
     if (beat.step !== this.lastStep) {
@@ -337,14 +394,24 @@ export class Renderer {
       if (beat.step === 4 || beat.step === 12) this.aberr = Math.max(this.aberr, 1.6 * beat.intensity + 0.4);
     }
 
+    const reveal = view.phase === 'intro' ? clamp01(view.phaseT / (INTRO_T * 0.85)) : 1;
+
     this.drawBackground(g, view, beat, dt);
-    if (view.geo) {
+    if (view.course) {
       this.drawFrame(g, view, beat);
-      this.drawWalls(g, view, beat);
-      this.drawExit(g, view, beat);
+      this.drawZones(g, view, beat, reveal);
+      this.drawWalls(g, view, beat, reveal);
+      g.save();
+      g.globalAlpha = reveal;
+      this.drawObstacles(g, view, beat);
+      this.drawPurge(g, view);
+      g.restore();
+      this.drawGoal(g, view, beat);
       this.drawStart(g, view, beat);
+      this.drawPickup(g, view, beat, reveal);
       this.drawRings(g);
-      this.drawTrail(g, view, beat);
+      this.drawTrail(g, view);
+      this.drawPhantom(g, view);
       this.drawCursor(g, view, beat);
     }
     this.updateParticles(g, dt);
@@ -364,7 +431,6 @@ export class Renderer {
     g.fillStyle = bg;
     g.fillRect(0, 0, W, H);
 
-    // stars
     g.save();
     g.globalCompositeOperation = 'lighter';
     for (const s of this.stars) {
@@ -375,7 +441,6 @@ export class Renderer {
     }
     g.restore();
 
-    // sun
     const sunY = 340;
     const sunR = 230 + kick * 14;
     g.save();
@@ -389,7 +454,6 @@ export class Renderer {
     g.beginPath();
     g.arc(W / 2, sunY, sunR, 0, Math.PI * 2);
     g.fill();
-    // stripes cut out of the sun (scrolling)
     g.globalCompositeOperation = 'destination-out';
     g.globalAlpha = 1;
     const scroll = (beat.beat * 0.35) % 1;
@@ -401,7 +465,6 @@ export class Renderer {
     }
     g.restore();
 
-    // perspective floor + ceiling grid
     const horizon = 392;
     const vp = { x: W / 2, y: horizon };
     g.save();
@@ -430,7 +493,6 @@ export class Renderer {
         g.stroke();
       }
     }
-    // horizon line
     g.globalAlpha = 0.35 + kick * 0.5;
     g.lineWidth = 2;
     g.strokeStyle = zone.secondary;
@@ -440,7 +502,6 @@ export class Renderer {
     g.stroke();
     g.restore();
 
-    // ambient motes
     g.save();
     g.globalCompositeOperation = 'lighter';
     for (const m of this.motes) {
@@ -462,25 +523,20 @@ export class Renderer {
   }
 
   private drawFrame(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
-    const geo = view.geo!;
     const zone = view.zone;
     const pad = 16;
-    const x = geo.ox - pad;
-    const y = geo.oy - pad;
-    const w = geo.w + pad * 2;
-    const h = geo.h + pad * 2;
+    const x = PLAY.x - pad;
+    const y = PLAY.y - pad;
+    const w = PLAY.w + pad * 2;
+    const h = PLAY.h + pad * 2;
     g.save();
     g.fillStyle = 'rgba(4,2,16,0.86)';
     this.roundRect(g, x, y, w, h, 10);
     g.fill();
-    // subtle cell-corner dots inside the maze
-    g.fillStyle = rgba(zone.primary, 0.12);
-    for (let cy = 1; cy < geo.rows; cy++) {
-      for (let cx = 1; cx < geo.cols; cx++) {
-        g.fillRect(geo.ox + cx * geo.cell - 0.5, geo.oy + cy * geo.cell - 0.5, 1, 1);
-      }
+    g.fillStyle = rgba(zone.primary, 0.1);
+    for (let cy = PLAY.y + 40; cy < PLAY.y + PLAY.h; cy += 40) {
+      for (let cx = PLAY.x + 40; cx < PLAY.x + PLAY.w; cx += 40) g.fillRect(cx - 0.5, cy - 0.5, 1, 1);
     }
-    // frame glow
     g.globalCompositeOperation = 'lighter';
     g.lineWidth = 8;
     g.strokeStyle = rgba(zone.primary, 0.08 + beat.kick * 0.14);
@@ -490,26 +546,184 @@ export class Renderer {
     g.strokeStyle = rgba(zone.primary, 0.35 + beat.kick * 0.45);
     this.roundRect(g, x, y, w, h, 10);
     g.stroke();
-    // bar sweep: a scanning line that crosses the maze once per bar
-    const sx = geo.ox + geo.w * beat.barPhase;
+    const sx = PLAY.x + PLAY.w * beat.barPhase;
     const sweep = g.createLinearGradient(sx - 60, 0, sx, 0);
     sweep.addColorStop(0, rgba(zone.primary, 0));
-    sweep.addColorStop(1, rgba(zone.primary, 0.12 + beat.intensity * 0.08));
+    sweep.addColorStop(1, rgba(zone.primary, 0.1 + beat.intensity * 0.08));
     g.fillStyle = sweep;
-    g.fillRect(sx - 60, geo.oy, 60, geo.h);
+    g.fillRect(sx - 60, PLAY.y, 60, PLAY.h);
     g.restore();
   }
 
-  private drawWalls(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
-    const geo = view.geo!;
+  private polyPath(g: CanvasRenderingContext2D, poly: Vec[]) {
+    g.moveTo(poly[0].x, poly[0].y);
+    for (let i = 1; i < poly.length; i++) g.lineTo(poly[i].x, poly[i].y);
+    g.closePath();
+  }
+
+  private label(g: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, color: string, alpha: number, spacing = 4) {
+    g.save();
+    g.globalAlpha = alpha;
+    g.fillStyle = color;
+    g.font = `700 ${size}px Orbitron, "Segoe UI", sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    (g as unknown as { letterSpacing: string }).letterSpacing = `${spacing}px`;
+    g.fillText(text, x + spacing / 2, y);
+    g.restore();
+  }
+
+  private drawZones(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo, reveal: number) {
+    const course = view.course!;
+    for (const z of course.zones) {
+      const info = MODIFIER_INFO[z.kind];
+      const active = view.activeZone === z;
+      const col = info.color;
+      g.save();
+      g.globalAlpha = reveal;
+      g.beginPath();
+      this.polyPath(g, z.poly);
+      if (z.holes) for (const h of z.holes) this.polyPath(g, h);
+      g.fillStyle = rgba(col, active ? 0.14 + beat.kick * 0.08 : 0.06);
+      g.fill('evenodd');
+      const pat = g.createPattern(this.hatch, 'repeat');
+      if (pat) {
+        g.save();
+        g.clip('evenodd');
+        g.globalAlpha = reveal * (active ? 0.18 : 0.07);
+        g.fillStyle = pat;
+        g.translate((this.time * 12) % 16, 0);
+        g.fillRect(-32, 0, W + 64, H);
+        g.restore();
+      }
+      g.setLineDash([8, 6]);
+      g.lineDashOffset = -this.time * 30;
+      g.strokeStyle = rgba(col, active ? 0.8 : 0.35);
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.setLineDash([]);
+      // label position (centroid) doubles as the "inside" reference for gate chevrons
+      let cx = 0;
+      let cy = 0;
+      for (const p of z.poly) {
+        cx += p.x;
+        cy += p.y;
+      }
+      cx /= z.poly.length;
+      cy /= z.poly.length;
+      // gates
+      const drawGate = (s: Segment, isEntry: boolean) => {
+        const bright = isEntry ? col : '#ffffff';
+        g.globalCompositeOperation = 'lighter';
+        g.lineCap = 'round';
+        g.strokeStyle = bright;
+        g.globalAlpha = reveal * 0.18;
+        g.lineWidth = 16;
+        g.beginPath();
+        g.moveTo(s.x1, s.y1);
+        g.lineTo(s.x2, s.y2);
+        g.stroke();
+        g.globalAlpha = reveal * (0.7 + beat.kick * 0.3);
+        g.lineWidth = 3;
+        g.stroke();
+        // travelling chevrons along the gate
+        const dx = s.x2 - s.x1;
+        const dy = s.y2 - s.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const n = Math.max(1, Math.floor(len / 26));
+        const tx = dx / len;
+        const ty = dy / len;
+        let nx = -ty;
+        let ny = tx;
+        // orient the normal toward the zone interior, then flip it for the exit gate
+        const mx = (s.x1 + s.x2) / 2;
+        const my = (s.y1 + s.y2) / 2;
+        if ((cx - mx) * nx + (cy - my) * ny < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        if (!isEntry) {
+          nx = -nx;
+          ny = -ny;
+        }
+        g.lineWidth = 2;
+        g.globalAlpha = reveal * 0.9;
+        const t = (this.time * 1.6) % 1;
+        for (let i = 0; i < n; i++) {
+          const f = (i + 0.5) / n;
+          const px = s.x1 + dx * f;
+          const py = s.y1 + dy * f;
+          const off = t * 14 - 7;
+          const tipX = px + nx * (off + 5);
+          const tipY = py + ny * (off + 5);
+          const bx = px + nx * (off - 3);
+          const by = py + ny * (off - 3);
+          g.beginPath();
+          g.moveTo(bx - tx * 5, by - ty * 5);
+          g.lineTo(tipX, tipY);
+          g.lineTo(bx + tx * 5, by + ty * 5);
+          g.stroke();
+        }
+        g.globalCompositeOperation = 'source-over';
+      };
+      const gs = view.gates[course.zones.indexOf(z)];
+      const gateLabel = (s: Segment, text: string, color: string, alpha: number) => {
+        const mx = (s.x1 + s.x2) / 2;
+        const my = (s.y1 + s.y2) / 2;
+        const vertical = Math.abs(s.x2 - s.x1) < Math.abs(s.y2 - s.y1);
+        const dirX = vertical ? (mx < cx ? -1 : 1) : 0;
+        const dirY = vertical ? 0 : my < cy ? -1 : 1;
+        const lx = mx + dirX * 22;
+        const ly = vertical ? Math.min(s.y1, s.y2) - 10 : my + dirY * 16;
+        this.label(g, text, lx, ly, 8, color, alpha, 3);
+      };
+      if (!gs || !gs.entryUsed) {
+        drawGate(z.entry, true);
+        gateLabel(z.entry, `${info.label} ▸`, col, reveal * 0.9);
+      }
+      if (!gs || !gs.exitUsed) {
+        if (active) {
+          // pulse the exit node so the player knows where the restore point is
+          g.save();
+          g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = '#ffffff';
+          g.lineCap = 'round';
+          g.lineWidth = 22 + Math.sin(this.time * 6) * 6;
+          g.globalAlpha = reveal * (0.12 + beat.kick * 0.1);
+          g.beginPath();
+          g.moveTo(z.exit.x1, z.exit.y1);
+          g.lineTo(z.exit.x2, z.exit.y2);
+          g.stroke();
+          g.restore();
+        }
+        drawGate(z.exit, false);
+        gateLabel(z.exit, '◂ RESTORE', '#ffffff', reveal * (active ? 0.95 : 0.55));
+      }
+      const lift = z.holes ? -170 : -Math.min(60, (this.polyHeight(z.poly) / 2) * 0.55);
+      this.label(g, info.label, cx, cy + lift, 18, col, reveal * (active ? 0.9 : 0.45), 8);
+      this.label(g, active ? info.blurb : 'ZONE', cx, cy + lift + 22, 9, col, reveal * (active ? 0.8 : 0.35), 4);
+      g.restore();
+    }
+  }
+
+  private polyHeight(poly: Vec[]): number {
+    let a = Infinity;
+    let b = -Infinity;
+    for (const p of poly) {
+      a = Math.min(a, p.y);
+      b = Math.max(b, p.y);
+    }
+    return b - a;
+  }
+
+  private drawWalls(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo, reveal: number) {
     const zone = view.zone;
     const glowA = 0.5 + beat.kick * 0.5;
-    const reveal = view.phase === 'intro' ? clamp01(view.phaseT / (INTRO_T * 0.85)) : 1;
     const revealR = reveal * this.maxReveal * 1.05;
     g.save();
     if (reveal < 1) {
       g.beginPath();
-      g.arc(geo.start.x, geo.start.y, revealR, 0, Math.PI * 2);
+      g.arc(this.start.x, this.start.y, revealR, 0, Math.PI * 2);
       g.clip();
     }
     g.globalAlpha = glowA;
@@ -526,21 +740,19 @@ export class Renderer {
       g.globalAlpha = 0.8 * (1 - reveal);
       g.lineWidth = 3;
       g.beginPath();
-      g.arc(geo.start.x, geo.start.y, revealR, 0, Math.PI * 2);
+      g.arc(this.start.x, this.start.y, revealR, 0, Math.PI * 2);
       g.stroke();
       g.restore();
     }
-    // danger highlight on nearby walls
     if (view.near.length && (view.phase === 'playing' || view.phase === 'dying')) {
       g.save();
       g.lineCap = 'round';
       g.globalCompositeOperation = 'lighter';
       for (const n of view.near) {
-        const warnDist = 30;
-        const a = clamp01(1 - n.d / warnDist);
+        const a = clamp01(1 - n.d / 30);
         if (a <= 0) continue;
         const wallT = n.seg.ht * 2;
-        g.strokeStyle = '#ff2d55';
+        g.strokeStyle = RED;
         g.globalAlpha = a * a * 0.35;
         g.lineWidth = wallT * 3;
         g.beginPath();
@@ -555,11 +767,484 @@ export class Renderer {
     }
   }
 
-  private drawExit(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
-    const geo = view.geo!;
+  /** Neon capsule bar: wide soft glow, colour body, white core. */
+  private bar(g: CanvasRenderingContext2D, s: Segment, color: string, alpha = 1) {
+    const t = s.ht * 2;
+    g.save();
+    g.lineCap = 'round';
+    g.globalCompositeOperation = 'lighter';
+    g.strokeStyle = color;
+    g.globalAlpha = alpha * 0.16;
+    g.lineWidth = t * 3.2;
+    g.beginPath();
+    g.moveTo(s.x1, s.y1);
+    g.lineTo(s.x2, s.y2);
+    g.stroke();
+    g.globalAlpha = alpha * 0.35;
+    g.lineWidth = t * 1.8;
+    g.stroke();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = alpha;
+    g.lineWidth = t;
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.lineWidth = Math.max(1.5, t * 0.36);
+    g.stroke();
+    g.restore();
+  }
+
+  private disc(g: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, alpha = 1) {
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const halo = g.createRadialGradient(x, y, r * 0.5, x, y, r * 2.6);
+    halo.addColorStop(0, rgba(color, 0.5 * alpha));
+    halo.addColorStop(1, rgba(color, 0));
+    g.fillStyle = halo;
+    g.beginPath();
+    g.arc(x, y, r * 2.6, 0, TAU);
+    g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = alpha;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(x, y, r, 0, TAU);
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.beginPath();
+    g.arc(x - r * 0.25, y - r * 0.25, r * 0.4, 0, TAU);
+    g.fill();
+    g.restore();
+  }
+
+  private drawObstacles(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
     const zone = view.zone;
-    const { x, y } = geo.exit;
-    const R = geo.exitR;
+    const sec = zone.secondary;
+    const pri = zone.primary;
+    for (const o of view.obstacles) {
+      const d = o.def;
+      switch (d.kind) {
+        case 'piston': {
+          // base plate
+          g.save();
+          g.translate(d.base.x, d.base.y);
+          g.rotate(Math.atan2(d.dir.y, d.dir.x));
+          g.fillStyle = pri;
+          g.fillRect(-4, -((d.t ?? 12) / 2 + 8), 8, (d.t ?? 12) + 16);
+          g.restore();
+          for (const s of o.caps) this.bar(g, s, sec);
+          break;
+        }
+        case 'slider': {
+          g.save();
+          g.setLineDash([4, 6]);
+          g.strokeStyle = rgba(pri, 0.35);
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(d.a.x, d.a.y);
+          g.lineTo(d.b.x, d.b.y);
+          g.stroke();
+          g.restore();
+          for (const s of o.caps) this.bar(g, s, sec);
+          break;
+        }
+        case 'spinner': {
+          for (const s of o.caps) this.bar(g, s, sec);
+          g.save();
+          g.strokeStyle = rgba(pri, 0.7);
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(d.pivot.x, d.pivot.y, (d.inner ?? 0) > 0 ? d.inner! - 4 : 7, 0, TAU);
+          g.stroke();
+          g.restore();
+          if (d.hub) this.disc(g, d.pivot.x, d.pivot.y, d.hub, sec);
+          break;
+        }
+        case 'orbit': {
+          g.save();
+          g.setLineDash([3, 7]);
+          g.lineDashOffset = -o.angle * 40;
+          g.strokeStyle = rgba(sec, 0.35);
+          g.lineWidth = 1;
+          g.beginPath();
+          g.arc(d.center.x, d.center.y, d.radius, 0, TAU);
+          g.stroke();
+          g.restore();
+          for (const b of o.discs) this.disc(g, b.x, b.y, b.r, sec);
+          break;
+        }
+        case 'door': {
+          const t = d.t ?? 10;
+          for (const p of [d.a, d.b]) {
+            g.fillStyle = pri;
+            g.fillRect(p.x - 5, p.y - 5, 10, 10);
+          }
+          if (o.doorState === 'closed') {
+            this.bar(g, { x1: d.a.x, y1: d.a.y, x2: d.b.x, y2: d.b.y, ht: t / 2 }, sec);
+          } else if (o.doorState === 'warn') {
+            const blink = 0.35 + 0.65 * Math.abs(Math.sin(this.time * 18));
+            g.save();
+            g.setLineDash([6, 6]);
+            g.strokeStyle = rgba(sec, blink);
+            g.lineWidth = 2;
+            g.beginPath();
+            g.moveTo(d.a.x, d.a.y);
+            g.lineTo(d.b.x, d.b.y);
+            g.stroke();
+            g.restore();
+          } else {
+            g.save();
+            g.strokeStyle = rgba(pri, 0.18);
+            g.lineWidth = 1;
+            g.setLineDash([2, 8]);
+            g.beginPath();
+            g.moveTo(d.a.x, d.a.y);
+            g.lineTo(d.b.x, d.b.y);
+            g.stroke();
+            g.restore();
+          }
+          break;
+        }
+        case 'sweeper': {
+          const s = o.caps[0];
+          if (s) {
+            g.save();
+            g.globalCompositeOperation = 'lighter';
+            const grad = g.createLinearGradient(s.x1, s.y1, s.x2, s.y2);
+            grad.addColorStop(0, rgba('#ffffff', 0.9));
+            grad.addColorStop(0.15, rgba(sec, 0.85));
+            grad.addColorStop(1, rgba(sec, 0.25));
+            g.strokeStyle = grad;
+            g.lineCap = 'round';
+            g.lineWidth = (d.t ?? 6) * 4;
+            g.globalAlpha = 0.18 + beat.kick * 0.1;
+            g.beginPath();
+            g.moveTo(s.x1, s.y1);
+            g.lineTo(s.x2, s.y2);
+            g.stroke();
+            g.globalAlpha = 1;
+            g.lineWidth = d.t ?? 6;
+            g.stroke();
+            g.strokeStyle = 'rgba(255,255,255,0.8)';
+            g.lineWidth = 1.5;
+            g.stroke();
+            g.restore();
+          }
+          // emitter + arc range
+          g.save();
+          g.strokeStyle = rgba(pri, 0.6);
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(d.pivot.x, d.pivot.y, 9, 0, TAU);
+          g.stroke();
+          if (d.a0 !== undefined && d.a1 !== undefined) {
+            g.strokeStyle = rgba(sec, 0.35);
+            g.setLineDash([3, 5]);
+            g.beginPath();
+            g.arc(d.pivot.x, d.pivot.y, 26, (d.a0 * Math.PI) / 180, (d.a1 * Math.PI) / 180);
+            g.stroke();
+          }
+          g.restore();
+          this.disc(g, d.pivot.x, d.pivot.y, 5, sec);
+          break;
+        }
+        case 'pulser': {
+          const gapHalf = ((d.gapWidth / 2) * Math.PI) / 180;
+          for (const ring of o.rings) {
+            const a = 0.35 + 0.65 * (1 - ring.R / d.maxR);
+            g.save();
+            g.globalCompositeOperation = 'lighter';
+            g.lineCap = 'round';
+            g.strokeStyle = sec;
+            for (const [lw, al] of [
+              [(d.t ?? 8) * 3, 0.15],
+              [d.t ?? 8, 0.9],
+            ]) {
+              g.lineWidth = lw;
+              g.globalAlpha = a * al;
+              g.beginPath();
+              for (let i = 0; i < d.gaps; i++) {
+                const g0 = ring.gapA + (TAU * i) / d.gaps + gapHalf;
+                const g1 = ring.gapA + (TAU * (i + 1)) / d.gaps - gapHalf;
+                g.moveTo(d.center.x + Math.cos(g0) * ring.R, d.center.y + Math.sin(g0) * ring.R);
+                g.arc(d.center.x, d.center.y, ring.R, g0, g1);
+              }
+              g.stroke();
+            }
+            g.restore();
+          }
+          this.disc(g, d.center.x, d.center.y, d.core ?? 14, sec, 0.9);
+          break;
+        }
+        case 'crush': {
+          this.drawCrushFill(g, d.path, d.width, o.front, o.lens);
+          this.drawCrushFront(g, o.frontPos, o.frontDir, d.width, o.front > 0);
+          break;
+        }
+        case 'seeker': {
+          if (o.spawned && (o.alive || o.fade > 0)) this.drawHunter(g, o.pos, d.r ?? 11, o.trail, o.alive ? 1 : o.fade, RED);
+          if (!o.spawned) {
+            // dormant marker
+            g.save();
+            g.strokeStyle = rgba(RED, 0.35 + 0.25 * Math.sin(this.time * 4));
+            g.setLineDash([3, 4]);
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.arc(d.spawn.x, d.spawn.y, 12, 0, TAU);
+            g.stroke();
+            g.restore();
+          }
+          break;
+        }
+        case 'well': {
+          g.save();
+          const grad = g.createRadialGradient(d.center.x, d.center.y, d.coreR, d.center.x, d.center.y, d.radius);
+          grad.addColorStop(0, 'rgba(0,0,0,0.85)');
+          grad.addColorStop(0.5, rgba(pri, 0.06));
+          grad.addColorStop(1, rgba(pri, 0));
+          g.fillStyle = grad;
+          g.beginPath();
+          g.arc(d.center.x, d.center.y, d.radius, 0, TAU);
+          g.fill();
+          g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = rgba(pri, 0.25);
+          g.lineWidth = 1;
+          g.setLineDash([2, 6]);
+          g.beginPath();
+          g.arc(d.center.x, d.center.y, d.radius, 0, TAU);
+          g.stroke();
+          g.setLineDash([]);
+          for (let k = 0; k < 3; k++) {
+            const rr = d.radius * (0.35 + k * 0.2);
+            const a0 = o.angle * (1 + k * 0.3) + (k * TAU) / 3;
+            g.strokeStyle = rgba(sec, 0.45 - k * 0.1);
+            g.lineWidth = 2 - k * 0.4;
+            g.beginPath();
+            g.arc(d.center.x, d.center.y, rr, a0, a0 + 1.6);
+            g.stroke();
+          }
+          g.strokeStyle = sec;
+          g.lineWidth = 3;
+          g.globalAlpha = 0.8 + beat.kick * 0.2;
+          g.beginPath();
+          g.arc(d.center.x, d.center.y, d.coreR + 4, 0, TAU);
+          g.stroke();
+          g.globalCompositeOperation = 'source-over';
+          g.fillStyle = '#000';
+          g.beginPath();
+          g.arc(d.center.x, d.center.y, d.coreR, 0, TAU);
+          g.fill();
+          g.restore();
+          break;
+        }
+        case 'spiral': {
+          g.save();
+          g.lineCap = 'round';
+          g.lineJoin = 'round';
+          const t = d.t ?? 10;
+          g.beginPath();
+          for (let i = 0; i < o.caps.length; i++) {
+            const s = o.caps[i];
+            if (i === 0) g.moveTo(s.x1, s.y1);
+            g.lineTo(s.x2, s.y2);
+          }
+          g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = pri;
+          g.globalAlpha = 0.16;
+          g.lineWidth = t * 3.5;
+          g.stroke();
+          g.globalAlpha = 0.35 + beat.kick * 0.2;
+          g.lineWidth = t * 2;
+          g.stroke();
+          g.globalCompositeOperation = 'source-over';
+          g.globalAlpha = 1;
+          g.lineWidth = t;
+          g.stroke();
+          g.strokeStyle = 'rgba(255,255,255,0.9)';
+          g.lineWidth = t * 0.36;
+          g.stroke();
+          g.restore();
+          // mouth marker at the outer end
+          const last = o.caps[o.caps.length - 1];
+          if (last) this.disc(g, last.x2, last.y2, 7, sec);
+          break;
+        }
+        case 'breather': {
+          for (const side of o.sides) {
+            g.save();
+            g.lineCap = 'round';
+            g.lineJoin = 'round';
+            g.beginPath();
+            g.moveTo(side[0].x, side[0].y);
+            for (let i = 1; i < side.length; i++) g.lineTo(side[i].x, side[i].y);
+            const t = d.t ?? 8;
+            g.globalCompositeOperation = 'lighter';
+            g.strokeStyle = pri;
+            g.globalAlpha = 0.16;
+            g.lineWidth = t * 4;
+            g.stroke();
+            g.globalAlpha = 0.3 + beat.kick * 0.3;
+            g.lineWidth = t * 2.2;
+            g.stroke();
+            g.globalCompositeOperation = 'source-over';
+            g.globalAlpha = 1;
+            g.lineWidth = t;
+            g.stroke();
+            g.strokeStyle = 'rgba(255,255,255,0.9)';
+            g.lineWidth = t * 0.38;
+            g.stroke();
+            g.restore();
+          }
+          break;
+        }
+        case 'bouncer': {
+          g.save();
+          g.setLineDash([6, 8]);
+          g.strokeStyle = rgba(sec, 0.3);
+          g.lineWidth = 1;
+          g.strokeRect(d.rect.x, d.rect.y, d.rect.w, d.rect.h);
+          g.restore();
+          for (const b of o.discs) this.disc(g, b.x, b.y, b.r, sec);
+          break;
+        }
+      }
+    }
+  }
+
+  private drawCrushFill(g: CanvasRenderingContext2D, path: Vec[], width: number, front: number, lens: number[]) {
+    if (front <= 0 || !this.noisePattern) return;
+    const total = lens[lens.length - 1];
+    const s = Math.min(front, total);
+    g.save();
+    g.lineCap = 'butt';
+    g.lineJoin = 'round';
+    g.lineWidth = width;
+    g.beginPath();
+    g.moveTo(path[0].x, path[0].y);
+    let i = 1;
+    while (i < lens.length && lens[i] <= s) {
+      g.lineTo(path[i].x, path[i].y);
+      i++;
+    }
+    const { p } = pointAlong(path, lens, s);
+    g.lineTo(p.x, p.y);
+    g.translate((this.time * 90) % 128, (this.time * 37) % 128);
+    g.strokeStyle = this.noisePattern;
+    g.globalAlpha = 0.85;
+    g.stroke();
+    g.restore();
+  }
+
+  private drawCrushFront(g: CanvasRenderingContext2D, pos: Vec, dir: Vec, width: number, active: boolean) {
+    g.save();
+    g.translate(pos.x, pos.y);
+    g.rotate(Math.atan2(dir.y, dir.x));
+    g.globalCompositeOperation = 'lighter';
+    const grad = g.createLinearGradient(-40, 0, 0, 0);
+    grad.addColorStop(0, rgba(RED, 0));
+    grad.addColorStop(1, rgba(RED, 0.55));
+    g.fillStyle = grad;
+    g.fillRect(-40, -width / 2, 40, width);
+    g.strokeStyle = RED;
+    g.lineWidth = 4;
+    g.globalAlpha = active ? 1 : 0.4;
+    g.beginPath();
+    g.moveTo(0, -width / 2);
+    g.lineTo(0, width / 2);
+    g.stroke();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.5;
+    g.stroke();
+    g.restore();
+    if (active && Math.random() < 0.6) {
+      const off = (Math.random() - 0.5) * width;
+      this.sparks(pos.x - dir.y * off, pos.y + dir.x * off, dir.x * 60, dir.y * 60, Math.random() < 0.5 ? RED : '#ffffff', 2);
+    }
+  }
+
+  private drawPurge(g: CanvasRenderingContext2D, view: GameView) {
+    const p = view.purge;
+    if (!p || !this.noisePattern) return;
+    g.save();
+    g.beginPath();
+    this.polyPath(g, p.poly);
+    g.clip();
+    g.translate(p.pos.x, p.pos.y);
+    g.rotate(Math.atan2(p.dir.y, p.dir.x));
+    g.translate((this.time * 90) % 128, (this.time * 37) % 128);
+    g.fillStyle = this.noisePattern;
+    g.globalAlpha = 0.85;
+    g.fillRect(-3000 - (this.time * 90) % 128, -2000, 3000, 4000);
+    g.restore();
+    this.drawCrushFront(g, p.pos, p.dir, p.span, true);
+  }
+
+  private drawHunter(g: CanvasRenderingContext2D, pos: Vec, r: number, trail: Vec[], alpha: number, color: string) {
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < trail.length; i++) {
+      const t = trail[i];
+      const a = (i / trail.length) * 0.35 * alpha;
+      g.globalAlpha = a;
+      g.fillStyle = color;
+      g.beginPath();
+      g.arc(t.x, t.y, r * (0.4 + (i / trail.length) * 0.6), 0, TAU);
+      g.fill();
+    }
+    const j = 2 + Math.random() * 2;
+    g.globalAlpha = alpha * 0.7;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(pos.x + j, pos.y, r + 1, 0, TAU);
+    g.fill();
+    g.fillStyle = '#19f0ff';
+    g.beginPath();
+    g.arc(pos.x - j, pos.y, r + 1, 0, TAU);
+    g.fill();
+    const halo = g.createRadialGradient(pos.x, pos.y, r, pos.x, pos.y, r * 4);
+    halo.addColorStop(0, rgba(color, 0.5 * alpha));
+    halo.addColorStop(1, rgba(color, 0));
+    g.fillStyle = halo;
+    g.beginPath();
+    g.arc(pos.x, pos.y, r * 4, 0, TAU);
+    g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = alpha;
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(pos.x, pos.y, r * 0.55, 0, TAU);
+    g.fill();
+    // glitch slice through the orb
+    g.fillStyle = color;
+    g.fillRect(pos.x - r - 4, pos.y - 1 + Math.sin(this.time * 40) * r * 0.6, r * 2 + 8, 2);
+    g.restore();
+  }
+
+  private drawPhantom(g: CanvasRenderingContext2D, view: GameView) {
+    const p = view.phantom;
+    if (!p || (!p.alive && p.fade <= 0)) return;
+    const col = view.zoneState ? MODIFIER_INFO[view.zoneState.kind].color : RED;
+    const arm = Math.min(1, p.age / 0.6);
+    if (p.alive && arm < 1) {
+      // materialising: a collapsing dashed ring telegraphs where it will be
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = col;
+      g.setLineDash([4, 6]);
+      g.lineWidth = 2;
+      g.globalAlpha = 0.9;
+      g.beginPath();
+      g.arc(p.x, p.y, p.r + 40 * (1 - arm), 0, TAU);
+      g.stroke();
+      g.restore();
+    }
+    this.drawHunter(g, p, p.r, p.trail, (p.alive ? 1 : p.fade) * (0.25 + 0.75 * arm), col);
+  }
+
+  private drawGoal(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
+    const course = view.course!;
+    const zone = view.zone;
+    const { x, y } = course.goal;
+    const R = course.goalR;
     const kick = beat.kick;
     g.save();
     g.globalCompositeOperation = 'lighter';
@@ -569,19 +1254,17 @@ export class Renderer {
     halo.addColorStop(1, rgba(zone.secondary, 0));
     g.fillStyle = halo;
     g.beginPath();
-    g.arc(x, y, R * 3.2, 0, Math.PI * 2);
+    g.arc(x, y, R * 3.2, 0, TAU);
     g.fill();
-    // rotating dashed ring
     g.strokeStyle = zone.secondary;
     g.lineWidth = 2;
     g.setLineDash([R * 0.5, R * 0.35]);
     g.lineDashOffset = -this.time * 60;
     g.globalAlpha = 0.9;
     g.beginPath();
-    g.arc(x, y, R * 1.25 + kick * 3, 0, Math.PI * 2);
+    g.arc(x, y, R * 1.25 + kick * 3, 0, TAU);
     g.stroke();
     g.setLineDash([]);
-    // spokes
     g.globalAlpha = 0.35 + kick * 0.3;
     g.lineWidth = 1.2;
     g.beginPath();
@@ -591,7 +1274,6 @@ export class Renderer {
       g.lineTo(x + Math.cos(a) * R * 1.05, y + Math.sin(a) * R * 1.05);
     }
     g.stroke();
-    // core
     const core = g.createRadialGradient(x, y, 0, x, y, R * 0.7 * (1 + kick * 0.2));
     core.addColorStop(0, '#ffffff');
     core.addColorStop(0.4, zone.secondary);
@@ -599,30 +1281,89 @@ export class Renderer {
     g.globalAlpha = 1;
     g.fillStyle = core;
     g.beginPath();
-    g.arc(x, y, R * 0.7 * (1 + kick * 0.2), 0, Math.PI * 2);
+    g.arc(x, y, R * 0.7 * (1 + kick * 0.2), 0, TAU);
     g.fill();
     g.restore();
   }
 
   private drawStart(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
-    const geo = view.geo!;
+    const course = view.course!;
     const zone = view.zone;
-    const d = Math.hypot(view.cursor.x - geo.start.x, view.cursor.y - geo.start.y);
-    const a = clamp01(1 - d / (geo.cell * 1.5)) * 0.8;
+    const d = Math.hypot(view.cursor.x - course.start.x, view.cursor.y - course.start.y);
+    const a = clamp01(1 - d / 120) * 0.8;
     if (a <= 0.01) return;
     g.save();
     g.globalCompositeOperation = 'lighter';
     g.globalAlpha = a * (0.6 + beat.kick * 0.4);
     g.strokeStyle = zone.primary;
     g.lineWidth = 1.5;
-    const r = Math.min(geo.cell * 0.36, 40);
     g.beginPath();
-    g.arc(geo.start.x, geo.start.y, r, 0, Math.PI * 2);
+    g.arc(course.start.x, course.start.y, 34, 0, TAU);
     g.stroke();
     g.globalAlpha = a * 0.5;
     g.beginPath();
-    g.arc(geo.start.x, geo.start.y, r * 0.6 + beat.kick * 4, 0, Math.PI * 2);
+    g.arc(course.start.x, course.start.y, 20 + beat.kick * 4, 0, TAU);
     g.stroke();
+    g.restore();
+  }
+
+  private drawPickup(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo, reveal: number) {
+    const course = view.course!;
+    if (!course.pickup || view.pickupTaken) return;
+    const { x, y } = course.pickup;
+    const kick = beat.kick;
+    g.save();
+    g.globalAlpha = reveal;
+    // beacon column
+    g.globalCompositeOperation = 'lighter';
+    const beam = g.createLinearGradient(0, PLAY.y, 0, y);
+    beam.addColorStop(0, 'rgba(255,255,255,0)');
+    beam.addColorStop(1, `rgba(255,255,255,${(0.16 + kick * 0.12).toFixed(3)})`);
+    g.fillStyle = beam;
+    g.fillRect(x - 3, PLAY.y, 6, y - PLAY.y);
+    const halo = g.createRadialGradient(x, y, 0, x, y, 60);
+    halo.addColorStop(0, `rgba(255,255,255,${(0.35 + kick * 0.25).toFixed(3)})`);
+    halo.addColorStop(0.4, rgba(view.zone.primary, 0.18));
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = halo;
+    g.beginPath();
+    g.arc(x, y, 60, 0, TAU);
+    g.fill();
+    g.globalCompositeOperation = 'source-over';
+    // hexagon
+    g.translate(x, y);
+    g.rotate(this.time * 0.8);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU;
+      const px = Math.cos(a) * 15;
+      const py = Math.sin(a) * 15;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.closePath();
+    g.stroke();
+    g.rotate(-this.time * 2.2);
+    g.strokeStyle = view.zone.primary;
+    g.lineWidth = 1.5;
+    g.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * TAU;
+      const px = Math.cos(a) * 9;
+      const py = Math.sin(a) * 9;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.closePath();
+    g.stroke();
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(x, y, 3.5 + kick * 2, 0, TAU);
+    g.fill();
+    this.label(g, 'REBOOT', x, y + 30, 9, '#ffffff', reveal * 0.8, 3);
     g.restore();
   }
 
@@ -637,22 +1378,21 @@ export class Renderer {
       g.strokeStyle = r.color;
       g.lineWidth = r.width * (0.4 + a);
       g.beginPath();
-      g.arc(r.x, r.y, rad, 0, Math.PI * 2);
+      g.arc(r.x, r.y, rad, 0, TAU);
       g.stroke();
     }
     g.restore();
   }
 
-  private drawTrail(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
+  private drawTrail(g: CanvasRenderingContext2D, view: GameView) {
     const zone = view.zone;
     const c = view.cursor;
-    if (view.phase === 'playing' || view.phase === 'title') {
+    if (view.attract) return;
+    if (view.phase === 'playing') {
       const last = this.trail[this.trail.length - 1];
       if (!last || Math.hypot(last.x - c.x, last.y - c.y) > 0.5) this.trail.push({ x: c.x, y: c.y, t: this.time });
       const speed = Math.hypot(view.vel.x, view.vel.y);
-      if (speed > 1.5 && view.phase === 'playing') {
-        this.sparks(c.x, c.y, view.vel.x, view.vel.y, Math.random() < 0.7 ? zone.primary : zone.accent, Math.min(4, speed * 0.25));
-      }
+      if (speed > 1.5) this.sparks(c.x, c.y, view.vel.x, view.vel.y, Math.random() < 0.7 ? zone.primary : zone.accent, Math.min(4, speed * 0.25));
     }
     const maxAge = 0.42;
     while (this.trail.length && this.time - this.trail[0].t > maxAge) this.trail.shift();
@@ -679,30 +1419,27 @@ export class Renderer {
       g.stroke();
     }
     g.restore();
-    void beat;
   }
 
   private drawCursor(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
-    if (view.phase === 'dying' || view.phase === 'won' || view.phase === 'clear') return;
+    if (view.attract || view.phase === 'dying' || view.phase === 'won' || view.phase === 'clear') return;
     const zone = view.zone;
     const { x, y, r } = view.cursor;
     const kick = beat.kick;
-    const mod = view.modifier;
-    const active = mod && mod.state === 'active' ? mod.kind : null;
+    const zs = view.zoneState;
+    const bodyColor = view.ghost ? '#3dff8f' : zone.primary;
     g.save();
     g.globalCompositeOperation = 'lighter';
-    // halo
     const hr = r * 4.6 * (1 + kick * 0.45);
     const halo = g.createRadialGradient(x, y, 0, x, y, hr);
-    halo.addColorStop(0, rgba(zone.primary, 0.55));
-    halo.addColorStop(0.4, rgba(zone.primary, 0.16));
-    halo.addColorStop(1, rgba(zone.primary, 0));
+    halo.addColorStop(0, rgba(bodyColor, 0.55));
+    halo.addColorStop(0.4, rgba(bodyColor, 0.16));
+    halo.addColorStop(1, rgba(bodyColor, 0));
     g.fillStyle = halo;
     g.beginPath();
-    g.arc(x, y, hr, 0, Math.PI * 2);
+    g.arc(x, y, hr, 0, TAU);
     g.fill();
-    // turbo streaks
-    if (active === 'TURBO') {
+    if (zs && zs.kind === 'TURBO') {
       const sp = Math.hypot(view.vel.x, view.vel.y);
       if (sp > 0.5) {
         const nx = -view.vel.x / sp;
@@ -721,40 +1458,46 @@ export class Renderer {
     }
     g.globalCompositeOperation = 'source-over';
     g.globalAlpha = 1;
-    // modifier ring
-    if (mod) {
-      const col = MODIFIER_INFO[mod.kind].color;
-      const rr = r + 7 + (mod.state === 'warn' ? Math.sin(this.time * 30) * 2 : 3);
+    if (zs) {
+      const col = MODIFIER_INFO[zs.kind].color;
+      const rr = r + 9;
       g.strokeStyle = col;
       g.lineWidth = 2;
-      g.setLineDash(mod.state === 'warn' ? [3, 5] : [6, 4]);
-      g.lineDashOffset = -this.time * (mod.kind === 'SPIN' ? 150 : 50);
-      g.globalAlpha = mod.state === 'warn' ? 0.5 + 0.5 * Math.abs(Math.sin(this.time * 12)) : 0.95;
+      g.setLineDash([6, 4]);
+      g.lineDashOffset = -this.time * (zs.kind === 'SPIN' ? 150 : 50);
+      g.globalAlpha = 0.95;
       g.beginPath();
-      g.arc(x, y, rr, 0, Math.PI * 2);
+      g.arc(x, y, rr, 0, TAU);
       g.stroke();
       g.setLineDash([]);
-      if (mod.state === 'active') {
-        // countdown arc
+      if (zs.pressure === 'decay') {
         g.globalAlpha = 0.9;
         g.lineWidth = 3;
         g.beginPath();
-        g.arc(x, y, rr + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - mod.progress));
+        g.arc(x, y, rr + 5, -Math.PI / 2, -Math.PI / 2 + TAU * zs.decay);
         g.stroke();
       }
     }
-    // body
+    if (view.ghost) {
+      g.strokeStyle = '#3dff8f';
+      g.setLineDash([2, 3]);
+      g.lineWidth = 1;
+      g.beginPath();
+      g.arc(x, y, r + 16, 0, TAU);
+      g.stroke();
+      g.setLineDash([]);
+    }
     g.globalAlpha = 1;
-    g.fillStyle = zone.primary;
+    g.fillStyle = bodyColor;
     g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
+    g.arc(x, y, r, 0, TAU);
     g.fill();
     g.strokeStyle = '#ffffff';
     g.lineWidth = 1.5;
     g.stroke();
     g.fillStyle = '#ffffff';
     g.beginPath();
-    g.arc(x - r * 0.25, y - r * 0.25, r * 0.38, 0, Math.PI * 2);
+    g.arc(x - r * 0.25, y - r * 0.25, r * 0.38, 0, TAU);
     g.fill();
     g.restore();
   }
@@ -778,7 +1521,7 @@ export class Renderer {
       g.strokeStyle = p.color;
       if (p.shape === 'dot') {
         g.beginPath();
-        g.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2);
+        g.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, TAU);
         g.fill();
       } else if (p.shape === 'square') {
         const s = p.size * (0.5 + a);
@@ -797,9 +1540,17 @@ export class Renderer {
   }
 
   private drawBlackout(g: CanvasRenderingContext2D, view: GameView, dt: number) {
-    const mod = view.modifier;
+    const zs = view.zoneState;
     let target = 0;
-    if (mod && mod.kind === 'BLACKOUT') target = mod.state === 'active' ? 1 : 0.35;
+    if (zs && zs.kind === 'BLACKOUT') target = 1;
+    else if (view.course && view.phase === 'playing') {
+      // dim ahead of a blackout zone so the player sees it coming
+      for (const z of view.course.zones) {
+        if (z.kind !== 'BLACKOUT') continue;
+        const dx = Math.min(...z.poly.map((p) => Math.abs(p.x - view.cursor.x)));
+        if (dx < 120) target = Math.max(target, 0.25 * (1 - dx / 120));
+      }
+    }
     this.blackout += (target - this.blackout) * Math.min(1, dt * 6);
     if (this.blackout < 0.01) return;
     const { x, y } = view.cursor;
@@ -848,7 +1599,6 @@ export class Renderer {
       ctx.drawImage(this.scene, 0, 0);
     }
 
-    // bloom
     if (this.filterOK) {
       const b = this.bctx;
       b.setTransform(1, 0, 0, 1, 0, 0);
@@ -863,7 +1613,6 @@ export class Renderer {
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // glitch slices
     if (this.glitchAmt > 0.04) {
       const n = Math.ceil(this.glitchAmt * 12);
       for (let i = 0; i < n; i++) {
@@ -882,7 +1631,6 @@ export class Renderer {
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    // decay
     this.shakeAmt *= Math.exp(-dt * 5.5);
     this.aberr = Math.max(beat.snare * 1.2 * beat.intensity, this.aberr * Math.exp(-dt * 9));
     this.glitchAmt *= Math.exp(-dt * 4);

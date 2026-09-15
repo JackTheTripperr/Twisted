@@ -10,7 +10,7 @@ export interface Segment {
   y2: number;
   /** half thickness */
   ht: number;
-  /** true for chokepoint "teeth" (drawn in the accent colour) */
+  /** drawn in the secondary colour (chokepoint teeth, moving parts) */
   tooth?: boolean;
 }
 
@@ -19,28 +19,45 @@ export interface Vec {
   y: number;
 }
 
-export interface LevelGeometry {
-  cols: number;
-  rows: number;
-  cell: number;
-  ox: number;
-  oy: number;
-  w: number;
-  h: number;
-  segs: Segment[];
-  start: Vec;
-  exit: Vec;
-  exitR: number;
-  /** pixel centres of the solution path cells */
-  solution: Vec[];
+export interface Disc {
+  x: number;
+  y: number;
+  r: number;
 }
 
-export interface ModifierState {
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** How a modifier zone forces the player to keep moving. */
+export type Pressure = 'phantom' | 'purge' | 'decay' | 'none';
+
+export interface ZoneDef {
   kind: ModifierKind;
-  state: 'warn' | 'active';
-  /** seconds remaining in the current state */
-  remaining: number;
-  total: number;
+  poly: Vec[];
+  /** optional holes (e.g. the spiral centre) where the zone is NOT active */
+  holes?: Vec[][];
+  entry: Segment;
+  exit: Segment;
+  pressure: Pressure;
+  /** beats of signal before a decay zone kills */
+  decayBeats?: number;
+}
+
+/** Per-zone consumable gate nodes: touching the entry activates, touching the exit restores. */
+export interface GateState {
+  entryUsed: boolean;
+  exitUsed: boolean;
+}
+
+export interface ZoneState {
+  kind: ModifierKind;
+  pressure: Pressure;
+  /** 0..1 fraction of decay remaining (1 when not a decay zone) */
+  decay: number;
 }
 
 export interface Snapshot {
@@ -52,9 +69,15 @@ export interface Snapshot {
   runTime: number;
   bestLevel: number;
   bestTime: number | null;
-  modifier: ModifierState | null;
+  zone: ZoneState | null;
+  reboots: number;
+  /** a reboot core exists on this level and has not been collected */
+  pickupAvailable: boolean;
+  /** the death currently being shown consumed a reboot */
+  rebootUsed: boolean;
   locked: boolean;
   fallbackInput: boolean;
   lastDeathLevel: number;
   winTime: number;
+  ghost: boolean;
 }

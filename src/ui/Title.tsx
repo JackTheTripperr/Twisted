@@ -5,7 +5,7 @@ export function Title({ snap, muted }: { snap: Snapshot; muted: boolean }) {
   return (
     <div className="overlay title">
       <div className="title-top">
-        <span className="title-tag">// NEURAL MAZE PROTOCOL v2.0</span>
+        <span className="title-tag">// NEURAL OBSTACLE PROTOCOL v2.0</span>
       </div>
       <h1 className="logo" data-text="TWISTED">
         TWISTED
@@ -17,13 +17,16 @@ export function Title({ snap, muted }: { snap: Snapshot; muted: boolean }) {
           <b>INVERTED</b> · every mouse movement is reversed
         </li>
         <li>
-          <b>FRAGILE</b> · touch a wall and you reboot to level 01
+          <b>FRAGILE</b> · touch anything neon and you restart from level 01
         </li>
         <li>
-          <b>20 SECTORS</b> · corridors narrow, turns multiply, the grid fights back
+          <b>20 SECTORS</b> · pistons, spinners, lasers, seekers, collapsing halls, a spiral or two
         </li>
         <li>
-          <b>GLITCHES</b> · from sector 05 the rules mutate for a few seconds at a time
+          <b>GATES</b> · pass a gate node and your controls are rewritten until the next one · a phantom hunts anyone who stalls
+        </li>
+        <li>
+          <b className="white">REBOOT CORES</b> · every fifth sector hides a core that lets you retry the sector you die on · it is never on the way
         </li>
       </ul>
       <div className="title-foot">

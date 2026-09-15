@@ -1,4 +1,4 @@
-import { LEVEL_COUNT, MODIFIER_INFO } from '../game/levels';
+import { LEVEL_COUNT, MAX_REBOOTS, MODIFIER_INFO, PRESSURE_INFO } from '../game/levels';
 import type { Snapshot } from '../game/types';
 
 export function fmtTime(s: number): string {
@@ -9,8 +9,8 @@ export function fmtTime(s: number): string {
 }
 
 export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
-  const mod = snap.modifier;
-  const info = mod ? MODIFIER_INFO[mod.kind] : null;
+  const z = snap.zone;
+  const info = z ? MODIFIER_INFO[z.kind] : null;
   return (
     <>
       <div className="hud">
@@ -21,6 +21,8 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
             <small>/{LEVEL_COUNT}</small>
           </span>
           <span className="hud-sub">{snap.levelName}</span>
+          {snap.pickupAvailable && <span className="core-badge">◈ REBOOT CORE IN THIS SECTOR</span>}
+          {snap.ghost && <span className="ghost-badge">GHOST MODE · DEV</span>}
         </div>
         <div className="hud-block hud-center">
           <div className="pips" aria-hidden="true">
@@ -30,13 +32,17 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
             <span className="pip" />
           </div>
           <span className="hud-zone">{snap.zoneName}</span>
-          {mod && info && (
-            <div className={`mod-chip mod-${mod.state}`} style={{ ['--mod' as string]: info.color }}>
-              <span className="mod-name">{mod.state === 'warn' ? `⚠ INCOMING · ${info.label}` : info.label}</span>
-              <span className="mod-blurb">{info.blurb}</span>
-              <span className="mod-bar">
-                <span className="mod-fill" />
+          {z && info && (
+            <div className="mod-chip mod-active" style={{ ['--mod' as string]: info.color }}>
+              <span className="mod-name">{info.label} ZONE</span>
+              <span className="mod-blurb">
+                {info.blurb} · {PRESSURE_INFO[z.pressure]}
               </span>
+              {z.pressure === 'decay' && (
+                <span className="mod-bar">
+                  <span className="mod-fill decay" />
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -50,6 +56,14 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
             <span className="hud-value mono">{fmtTime(snap.runTime)}</span>
           </div>
           <div className="stat">
+            <span className="hud-label">REBOOTS</span>
+            <span className="reboots" aria-label={`${snap.reboots} reboots`}>
+              {Array.from({ length: MAX_REBOOTS }, (_, i) => (
+                <span key={i} className={`slot ${i < snap.reboots ? 'on' : ''}`} />
+              ))}
+            </span>
+          </div>
+          <div className="stat">
             <span className="hud-label">BEST</span>
             <span className="hud-value">L{String(snap.bestLevel).padStart(2, '0')}</span>
           </div>
@@ -57,7 +71,7 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
       </div>
       <div className="footer">
         <span className="proximity">
-          <span className="prox-label">WALL PROXIMITY</span>
+          <span className="prox-label">HAZARD PROXIMITY</span>
           <span className="prox-bar">
             <span className="prox-fill" />
           </span>
