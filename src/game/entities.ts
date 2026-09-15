@@ -214,6 +214,8 @@ export interface PulserDef {
   gapWidth: number;
   /** degrees per beat */
   spin: number;
+  /** degrees, initial gap rotation */
+  gapPhase?: number;
   core?: number;
   t?: number;
   phase?: number;
@@ -256,6 +258,8 @@ export interface SpiralDef {
   spin: number;
   phase?: number;
   t?: number;
+  /** wind the other way (used by mirrored courses) */
+  mirror?: boolean;
 }
 export interface BreatherDef {
   kind: 'breather';
@@ -442,7 +446,7 @@ export function updateObstacle(o: Obstacle, c: Clock, ctx: SimContext) {
     case 'pulser': {
       o.rings.length = 0;
       const b = c.beat - (d.phase ?? 0);
-      const gapA = ((d.spin * Math.PI) / 180) * c.beat;
+      const gapA = ((d.spin * c.beat + (d.gapPhase ?? 0)) * Math.PI) / 180;
       for (let k = Math.floor(b / d.period); k >= 0; k--) {
         const R = (b - k * d.period) * d.speed;
         if (R >= d.maxR) break;
@@ -499,10 +503,11 @@ export function updateObstacle(o: Obstacle, c: Clock, ctx: SimContext) {
       const rot = TAU * (d.spin * c.bars + (d.phase ?? 0));
       const thetaMax = TAU * d.turns;
       const step = 0.14;
+      const sgn = d.mirror ? -1 : 1;
       let prev: Vec | null = null;
       for (let th = 0; th <= thetaMax + 1e-6; th += step) {
         const r = d.a + d.b * th;
-        const p = v(d.center.x + Math.cos(th + rot) * r, d.center.y + Math.sin(th + rot) * r);
+        const p = v(d.center.x + Math.cos(sgn * th + rot) * r, d.center.y + Math.sin(sgn * th + rot) * r);
         if (prev) o.caps.push(cap(prev, p, (d.t ?? 10) / 2));
         prev = p;
       }

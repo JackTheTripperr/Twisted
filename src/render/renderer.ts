@@ -20,6 +20,7 @@ export const INTRO_T = 1.25;
 export const DEATH_T = 2.0;
 export const REBOOT_T = 1.5;
 export const CLEAR_T = 1.35;
+export const PRACTICE_T = 1.0;
 
 export interface PhantomView {
   x: number;
@@ -54,6 +55,11 @@ export interface GameView {
   phantom: PhantomView | null;
   purge: PurgeView | null;
   pickupTaken: boolean;
+  fragmentTaken: boolean;
+  ghostPos: Vec | null;
+  surgeActive: boolean;
+  surgeT: number;
+  zoom: { x: number; y: number; s: number };
   hasMoved: boolean;
   near: { seg: Segment; d: number }[];
   ghost: boolean;
@@ -82,6 +88,16 @@ interface Ring {
   color: string;
   speed: number;
   width: number;
+  max: number;
+}
+
+interface FloatText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  size: number;
+  life: number;
   max: number;
 }
 
@@ -122,6 +138,11 @@ export class Renderer {
   private hatch: HTMLCanvasElement;
 
   private particles: Particle[] = [];
+  private floats: FloatText[] = [];
+  private shakeScale = 1;
+  private flashScale = 1;
+  private zoomState = { x: 640, y: 360, s: 1 };
+  private surgeOn = false;
   private trail: { x: number; y: number; t: number }[] = [];
   private rings: Ring[] = [];
   private stars: Star[] = [];
@@ -295,18 +316,32 @@ export class Renderer {
 
   // ------------------------------------------------------------------ effects API
 
+  setOptions(shake: boolean, flash: boolean) {
+    this.shakeScale = shake ? 1 : 0;
+    this.flashScale = flash ? 1 : 0.35;
+  }
   shake(a: number) {
-    this.shakeAmt = Math.max(this.shakeAmt, a);
+    this.shakeAmt = Math.max(this.shakeAmt, a * this.shakeScale);
   }
   glitch(a: number) {
-    this.glitchAmt = Math.max(this.glitchAmt, a);
+    this.glitchAmt = Math.max(this.glitchAmt, a * this.flashScale);
   }
   flash(color: string, a: number) {
     this.flashColor = color;
-    this.flashAmt = Math.max(this.flashAmt, a);
+    this.flashAmt = Math.max(this.flashAmt, a * this.flashScale);
   }
   chroma(a: number) {
-    this.aberr = Math.max(this.aberr, a);
+    this.aberr = Math.max(this.aberr, a * this.flashScale);
+  }
+  floatText(x: number, y: number, text: string, color: string, size = 16) {
+    this.floats.push({ x, y, text, color, size, life: 1.1, max: 1.1 });
+  }
+  /** Graze feedback: sparks, a tiny ring and a score popup. */
+  graze(x: number, y: number, color: string, text: string) {
+    this.sparks(x, y, 0, 0, color, 10);
+    this.sparks(x, y, 0, 0, '#ffffff', 4);
+    this.ring(x, y, color, 260, 2, 60);
+    this.floatText(x, y - 18, text, color, 13);
   }
   ring(x: number, y: number, color: string, speed = 260, width = 3, max = 240) {
     this.rings.push({ x, y, t0: this.time, color, speed, width, max });
@@ -376,8 +411,10 @@ export class Renderer {
 
   // ------------------------------------------------------------------ frame
 
-  frame(view: GameView, beat: BeatInfo, dt: number) {
-    this.time += dt;
+  frame(view: GameView, beat: BeatInfo, dt: number, fxDt = dt) {
+    this.time += fxDt;
+    this.zoomState = view.zoom;
+    this.surgeOn = view.surgeActive;
     const g = this.sctx;
     const zone = view.zone;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -396,7 +433,7 @@ export class Renderer {
 
     const reveal = view.phase === 'intro' ? clamp01(view.phaseT / (INTRO_T * 0.85)) : 1;
 
-    this.drawBackground(g, view, beat, dt);
+    this.drawBackground(g, view, beat, fxDt);
     if (view.course) {
       this.drawFrame(g, view, beat);
       this.drawZones(g, view, beat, reveal);
@@ -409,12 +446,15 @@ export class Renderer {
       this.drawGoal(g, view, beat);
       this.drawStart(g, view, beat);
       this.drawPickup(g, view, beat, reveal);
+      this.drawFragment(g, view, beat, reveal);
       this.drawRings(g);
       this.drawTrail(g, view);
+      this.drawGhost(g, view);
       this.drawPhantom(g, view);
       this.drawCursor(g, view, beat);
     }
-    this.updateParticles(g, dt);
+    this.updateParticles(g, fxDt);
+    this.drawFloats(g, fxDt);
     this.drawBlackout(g, view, dt);
     this.composite(beat, dt);
   }
@@ -1367,6 +1407,77 @@ export class Renderer {
     g.restore();
   }
 
+  private drawFragment(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo, reveal: number) {
+    const course = view.course!;
+    if (!course.fragment || view.fragmentTaken) return;
+    const { x, y } = course.fragment;
+    const col = view.zone.primary;
+    g.save();
+    g.globalAlpha = reveal;
+    g.globalCompositeOperation = 'lighter';
+    const halo = g.createRadialGradient(x, y, 0, x, y, 34);
+    halo.addColorStop(0, rgba(col, 0.35 + beat.kick * 0.25));
+    halo.addColorStop(1, rgba(col, 0));
+    g.fillStyle = halo;
+    g.beginPath();
+    g.arc(x, y, 34, 0, TAU);
+    g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.translate(x, y);
+    g.rotate(this.time * 1.6);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.moveTo(0, -10);
+    g.lineTo(7, 0);
+    g.lineTo(0, 10);
+    g.lineTo(-7, 0);
+    g.closePath();
+    g.stroke();
+    g.fillStyle = col;
+    g.beginPath();
+    g.moveTo(0, -5);
+    g.lineTo(3.5, 0);
+    g.lineTo(0, 5);
+    g.lineTo(-3.5, 0);
+    g.closePath();
+    g.fill();
+    g.restore();
+  }
+
+  private drawGhost(g: CanvasRenderingContext2D, view: GameView) {
+    const p = view.ghostPos;
+    if (!p || view.phase !== 'playing') return;
+    g.save();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = view.zone.accent;
+    g.setLineDash([3, 3]);
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(p.x, p.y, view.cursor.r + 1, 0, TAU);
+    g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = rgba(view.zone.accent, 0.25);
+    g.beginPath();
+    g.arc(p.x, p.y, view.cursor.r * 0.6, 0, TAU);
+    g.fill();
+    g.restore();
+    this.label(g, 'BEST', p.x, p.y - view.cursor.r - 9, 7, view.zone.accent, 0.5, 2);
+  }
+
+  private drawFloats(g: CanvasRenderingContext2D, dt: number) {
+    const alive: FloatText[] = [];
+    for (const f of this.floats) {
+      f.life -= dt;
+      if (f.life <= 0) continue;
+      const k = 1 - f.life / f.max;
+      const a = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+      this.label(g, f.text, f.x, f.y - k * 34, f.size, f.color, a, 2);
+      alive.push(f);
+    }
+    this.floats = alive;
+  }
+
   private drawRings(g: CanvasRenderingContext2D) {
     g.save();
     g.globalCompositeOperation = 'lighter';
@@ -1439,6 +1550,19 @@ export class Renderer {
     g.beginPath();
     g.arc(x, y, hr, 0, TAU);
     g.fill();
+    if (view.surgeActive) {
+      // time dilation: concentric rings breathing out of the cursor
+      g.strokeStyle = '#bfe9ff';
+      for (let i = 0; i < 3; i++) {
+        const ph = (view.surgeT * 1.6 + i / 3) % 1;
+        g.globalAlpha = (1 - ph) * 0.5;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.arc(x, y, r + 6 + ph * 70, 0, TAU);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+    }
     if (zs && zs.kind === 'TURBO') {
       const sp = Math.hypot(view.vel.x, view.vel.y);
       if (sp > 0.5) {
@@ -1584,6 +1708,15 @@ export class Renderer {
     ctx.translate(Wd / 2 + sx, Hd / 2 + sy);
     ctx.scale(scale, scale);
     ctx.translate(-Wd / 2, -Hd / 2);
+    // cinematic zoom (death cam, portal warp, level entry)
+    const zs = this.zoomState;
+    if (Math.abs(zs.s - 1) > 0.002) {
+      const zx = zs.x * dpr;
+      const zy = zs.y * dpr;
+      ctx.translate(zx, zy);
+      ctx.scale(zs.s, zs.s);
+      ctx.translate(-zx, -zy);
+    }
 
     const ab = this.aberr;
     if (ab > 0.45 && this.filterOK) {
@@ -1630,6 +1763,18 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.surgeOn) {
+      // cool tint + edge darkening while time is stretched
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(70,140,255,0.07)';
+      ctx.fillRect(0, 0, Wd, Hd);
+      ctx.globalCompositeOperation = 'source-over';
+      const vg = ctx.createRadialGradient(Wd / 2, Hd / 2, Hd * 0.35, Wd / 2, Hd / 2, Hd * 0.85);
+      vg.addColorStop(0, 'rgba(0,10,40,0)');
+      vg.addColorStop(1, 'rgba(0,10,40,0.55)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, Wd, Hd);
+    }
 
     this.shakeAmt *= Math.exp(-dt * 5.5);
     this.aberr = Math.max(beat.snare * 1.2 * beat.intensity, this.aberr * Math.exp(-dt * 9));
