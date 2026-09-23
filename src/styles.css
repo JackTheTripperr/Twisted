@@ -1525,3 +1525,96 @@ body,
   font-size: 11px;
   color: rgba(255, 255, 255, 0.7);
 }
+
+/* ------------------------------------------------------------ v4: boss fights, ten sectors */
+
+.tabs.ten .tab {
+  padding: 8px 4px 6px;
+}
+.tabs.ten .tab-name {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+.tiles.five {
+  grid-template-columns: repeat(5, 1fr);
+}
+.boss-bar {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border: 1px solid #ff2d55;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 calc(10px + 12px * var(--kick)) rgba(255, 45, 85, 0.6);
+  animation: chipIn 0.25s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.boss-bar.dead {
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
+  opacity: 0.7;
+}
+.boss-name {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.35em;
+  color: #ff2d55;
+  text-shadow: 0 0 8px #ff2d55;
+}
+.shells {
+  display: flex;
+  gap: 5px;
+}
+.shell {
+  width: 22px;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  transform: skewX(-20deg);
+}
+.shell.on {
+  background: #ff2d55;
+  box-shadow: 0 0 8px #ff2d55;
+}
+.boss-phase {
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: rgba(255, 255, 255, 0.7);
+}
+.overlay.boss-banner {
+  pointer-events: none;
+  animation: bannerIn 2.2s forwards;
+}
+.banner-text {
+  font-size: 118px;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  --primary: #ff2d55;
+  --secondary: #ffffff;
+  transform: skewX(-8deg);
+}
+@keyframes bannerIn {
+  0% {
+    opacity: 0;
+    transform: scale(1.4);
+    filter: blur(8px);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  20% {
+    opacity: 0.4;
+  }
+  30% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}

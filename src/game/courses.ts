@@ -5,6 +5,7 @@
  */
 
 import { box, corridor, line, rect, rectPoly, seg, v, type ObstacleDef } from './entities';
+import { LATE_BUILDERS } from './courses2';
 import { mazeSegments } from './maze';
 import type { Rect, Segment, Vec, ZoneDef } from './types';
 
@@ -27,22 +28,22 @@ export interface Course {
   goalR: number;
 }
 
-const frame = () => box(L, T, PLAY.w, PLAY.h, 4);
-const gate = (x1: number, y1: number, x2: number, y2: number): Segment => seg(x1, y1, x2, y2, 3);
-const lane = (top: number, bottom: number): Segment[] => [...line([v(L, top), v(R, top)]), ...line([v(L, bottom), v(R, bottom)])];
+export const frame = () => box(L, T, PLAY.w, PLAY.h, 4);
+export const gate = (x1: number, y1: number, x2: number, y2: number): Segment => seg(x1, y1, x2, y2, 3);
+export const lane = (top: number, bottom: number): Segment[] => [...line([v(L, top), v(R, top)]), ...line([v(L, bottom), v(R, bottom)])];
 
-function pistonTop(x: number, wallY: number, travel: number, period: number, phase: number): ObstacleDef {
+export function pistonTop(x: number, wallY: number, travel: number, period: number, phase: number): ObstacleDef {
   return { kind: 'piston', base: v(x, wallY), dir: v(0, 1), length: 12, travel, period, phase, t: 14 };
 }
-function pistonBottom(x: number, wallY: number, travel: number, period: number, phase: number): ObstacleDef {
+export function pistonBottom(x: number, wallY: number, travel: number, period: number, phase: number): ObstacleDef {
   return { kind: 'piston', base: v(x, wallY), dir: v(0, -1), length: 12, travel, period, phase, t: 14 };
 }
-function door(x: number, top: number, bottom: number, period: number, openFrac: number, phase: number): ObstacleDef {
+export function door(x: number, top: number, bottom: number, period: number, openFrac: number, phase: number): ObstacleDef {
   return { kind: 'door', a: v(x, top), b: v(x, bottom), period, openFrac, phase, t: 10 };
 }
 
 /** Remove the parts of axis-aligned segments that fall inside a rect (used to cut doorways). */
-function cutRect(segs: Segment[], r: Rect): Segment[] {
+export function cutRect(segs: Segment[], r: Rect): Segment[] {
   const out: Segment[] = [];
   const eps = 0.01;
   for (const s of segs) {
@@ -69,7 +70,7 @@ function cutRect(segs: Segment[], r: Rect): Segment[] {
   return out;
 }
 
-function circlePoly(c: Vec, r: number, n = 18): Vec[] {
+export function circlePoly(c: Vec, r: number, n = 18): Vec[] {
   const out: Vec[] = [];
   for (let i = 0; i < n; i++) out.push(v(c.x + Math.cos((i / n) * Math.PI * 2) * r, c.y + Math.sin((i / n) * Math.PI * 2) * r));
   return out;
@@ -270,7 +271,7 @@ function l11(): Course {
 function l12(): Course {
   return {
     walls: [...frame()],
-    obstacles: [{ kind: 'spiral', center: v(720, CY), a: 30, b: 10.5, turns: 2.75, spin: 0.125, phase: 0.75, t: 10 }],
+    obstacles: [{ kind: 'spiral', center: v(720, CY), a: 30, b: 10.5, turns: 2.75, spin: 0.3125, phase: 0.75, t: 10 }],
     zones: [],
     start: v(130, CY),
     goal: v(720, CY),
@@ -402,9 +403,8 @@ function l17(): Course {
 
 function l18(): Course {
   return {
-    walls: [...frame()],
+    walls: [...frame(), ...corridor([v(L, CY), v(R, CY)], 170)],
     obstacles: [
-      { kind: 'breather', pts: [v(L, CY), v(R, CY)], width: 170, amp: 20, t: 8 },
       pistonTop(220, 299, 112, 2, 0),
       pistonBottom(320, 469, 112, 2, 0.5),
       { kind: 'spinner', pivot: v(500, CY), arms: 2, radius: 78, speed: 0.5, hub: 12, t: 8 },
@@ -423,29 +423,31 @@ function l18(): Course {
 }
 
 function l19(): Course {
-  const center = v(790, CY);
+  const center = v(640, CY);
   return {
-    walls: [...frame()],
+    walls: [...frame(), ...lane(130, 638)],
     obstacles: [
-      { kind: 'sweeper', pivot: v(330, T), length: 320, a0: 30, a1: 150, speed: 0.3, t: 6 },
-      { kind: 'sweeper', pivot: v(330, B), length: 320, a0: 210, a1: 330, speed: 0.3, phase: 0.5, t: 6 },
-      { kind: 'spiral', center, a: 30, b: 10.5, turns: 2.5, spin: 0.125, phase: 0, t: 10 },
+      { kind: 'spinner', pivot: center, arms: 3, radius: 215, inner: 34, speed: 0.35, t: 10 },
+      { kind: 'pulser', center, period: 4, speed: 90, maxR: 300, gaps: 3, gapWidth: 46, spin: 15, t: 8 },
+      { kind: 'sweeper', pivot: v(L, 130), length: 420, a0: 12, a1: 78, speed: 0.3, t: 6 },
+      { kind: 'sweeper', pivot: v(R, 638), length: 420, a0: 192, a1: 258, speed: 0.3, phase: 0.5, t: 6 },
+      { kind: 'orbit', center, radius: 290, balls: 4, ballR: 12, speed: -0.3 },
     ],
     zones: [
       {
-        kind: 'SPIN',
-        poly: rectPoly(580, 175, 420, 420),
-        holes: [circlePoly(center, 21)],
-        entry: gate(580, 175, 580, 595),
-        exit: gate(center.x - 14, center.y, center.x + 14, center.y),
+        kind: 'TURBO',
+        poly: rectPoly(300, 130, 680, 508),
+        holes: [circlePoly(center, 40)],
+        entry: gate(300, 130, 300, 638),
+        exit: gate(center.x - 16, center.y - 36, center.x + 16, center.y - 36),
         pressure: 'decay',
-        decayBeats: 72,
+        decayBeats: 64,
       },
     ],
+    fragment: v(640, 200),
     start: v(130, CY),
     goal: center,
-    fragment: v(588, 300),
-    goalR: 14,
+    goalR: 15,
   };
 }
 
@@ -478,7 +480,7 @@ function l20(): Course {
   };
 }
 
-const BUILDERS = [l01, l02, l03, l04, l05, l06, l07, l08, l09, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20];
+const BUILDERS: (() => Course)[] = [l01, l02, l03, l04, l05, l06, l07, l08, l09, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, ...LATE_BUILDERS];
 
 const cache = new Map<number, Course>();
 

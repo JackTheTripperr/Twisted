@@ -441,12 +441,12 @@ export class AudioEngine {
 
   // ---------------------------------------------------------------- control
 
-  setMode(mode: MusicMode, level: number) {
+  setMode(mode: MusicMode, level: number, bpm?: number) {
     this.mode = mode;
     this.level = level;
     this.layers = layersFor(level, mode);
     this.intensity = mode === 'title' ? 0.15 : mode === 'win' ? 1 : Math.min(1, 0.25 + (level - 1) / 19);
-    const base = mode === 'title' ? 126 : mode === 'win' ? 132 : 126 + Math.min(4, Math.floor((level - 1) / 4)) * 4;
+    const base = bpm ?? (mode === 'title' ? 126 : mode === 'win' ? 132 : 126 + Math.min(4, Math.floor((level - 1) / 4)) * 4);
     this.targetBpm = Math.round(base * this.tempoMult);
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -1360,6 +1360,116 @@ export class AudioEngine {
       this.blip(t, 700, 0.06, 0.1, 'square');
       this.blip(t + 0.05, 480, 0.1, 0.1, 'square');
     }
+  }
+
+  /** Boss phase alarm: a two-tone siren sweep. */
+  sfxBossAlarm() {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const tt = t + i * 0.28;
+      const o = c.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(520, tt);
+      o.frequency.exponentialRampToValueAtTime(780, tt + 0.14);
+      o.frequency.exponentialRampToValueAtTime(520, tt + 0.27);
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 2400;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.14, tt);
+      g.gain.exponentialRampToValueAtTime(0.001, tt + 0.27);
+      o.connect(f);
+      f.connect(g);
+      g.connect(this.sfxBus);
+      g.connect(this.reverbSend);
+      o.start(tt);
+      o.stop(tt + 0.3);
+    }
+    this.crash(t, 0.5);
+  }
+
+  /** The weak point was grabbed: impact, then a descending stab. */
+  sfxBossHit() {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    const n = this.noiseSource(t, 0.5);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(6000, t);
+    lp.frequency.exponentialRampToValueAtTime(200, t + 0.45);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.8, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    n.connect(lp);
+    lp.connect(g);
+    g.connect(this.sfxBus);
+    g.connect(this.reverbSend);
+    const s = c.createOscillator();
+    s.type = 'sine';
+    s.frequency.setValueAtTime(110, t);
+    s.frequency.exponentialRampToValueAtTime(32, t + 0.4);
+    const sg = c.createGain();
+    sg.gain.setValueAtTime(1, t);
+    sg.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    s.connect(sg);
+    sg.connect(this.sfxBus);
+    s.start(t);
+    s.stop(t + 0.55);
+    for (const m of [64, 67, 71]) {
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(mtof(m), t + 0.05);
+      o.frequency.exponentialRampToValueAtTime(mtof(m - 12), t + 0.6);
+      const og = c.createGain();
+      og.gain.setValueAtTime(0.12, t + 0.05);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+      o.connect(og);
+      og.connect(this.sfxBus);
+      og.connect(this.reverbSend);
+      o.start(t + 0.05);
+      o.stop(t + 0.7);
+    }
+  }
+
+  /** The Warden dies: a long detonation and a chord that hangs in the reverb. */
+  sfxBossDie() {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    const n = this.noiseSource(t, 2.2);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(9000, t);
+    lp.frequency.exponentialRampToValueAtTime(80, t + 2);
+    const g = c.createGain();
+    g.gain.setValueAtTime(1, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 2.2);
+    n.connect(lp);
+    lp.connect(g);
+    g.connect(this.sfxBus);
+    g.connect(this.reverbSend);
+    const s = c.createOscillator();
+    s.type = 'sine';
+    s.frequency.setValueAtTime(90, t);
+    s.frequency.exponentialRampToValueAtTime(25, t + 1.2);
+    const sg = c.createGain();
+    sg.gain.setValueAtTime(1.2, t);
+    sg.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+    s.connect(sg);
+    sg.connect(this.sfxBus);
+    s.start(t);
+    s.stop(t + 1.5);
+    [57, 64, 69, 76, 81].forEach((m, i) => {
+      const { g: cg } = this.blip(t + 0.4 + i * 0.08, mtof(m), 2.4, 0.09, 'sawtooth');
+      const rs = c.createGain();
+      rs.gain.value = 1;
+      cg.connect(rs);
+      rs.connect(this.reverbSend);
+      cg.connect(this.delaySend);
+    });
   }
 
   /** New sector: crash and a short riser. */

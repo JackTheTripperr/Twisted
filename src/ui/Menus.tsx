@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ACHIEVEMENTS } from '../game/achievements';
 import type { Game } from '../game/engine';
-import { LEVELS, ZONES } from '../game/levels';
+import { LEVELS, LEVEL_COUNT, PRACTICE_TABS, ZONES } from '../game/levels';
 import { RANK_COLOR, fmtScore } from '../game/score';
 import type { Options, Snapshot } from '../game/types';
 import { Btn, fmtTime, pad2 } from './bits';
@@ -27,13 +27,15 @@ function Panel({ title, sub, onClose, game, children, wide = false }: { title: s
 
 export function PracticePanel({ snap, game, onClose }: { snap: Snapshot; game: Game; onClose: () => void }) {
   const p = snap.profile;
-  const [sector, setSector] = useState(Math.min(p.sectorsUnlocked, 5) - 1);
-  const levels = LEVELS.filter((l) => l.zone === sector);
-  const zone = ZONES[sector];
+  const [sector, setSector] = useState(Math.min(p.sectorsUnlocked, PRACTICE_TABS.length) - 1);
+  const tab = PRACTICE_TABS[sector];
+  const levels = tab.levels.map((n) => LEVELS[n - 1]);
+  const zone = ZONES[tab.zone];
   return (
     <Panel title="PRACTICE" sub="Any sector you have reached in a run. Deaths restart the level. Best times save a ghost." onClose={onClose} game={game} wide>
-      <div className="tabs">
-        {ZONES.map((z, i) => {
+      <div className="tabs ten">
+        {PRACTICE_TABS.map((t, i) => {
+          const z = ZONES[t.zone];
           const locked = i + 1 > p.sectorsUnlocked;
           return (
             <button
@@ -49,13 +51,13 @@ export function PracticePanel({ snap, game, onClose }: { snap: Snapshot; game: G
                 setSector(i);
               }}
             >
-              <span className="tab-num">0{i + 1}</span>
+              <span className="tab-num">{String(i + 1).padStart(2, '0')}</span>
               <span className="tab-name">{locked ? 'LOCKED' : z.name}</span>
             </button>
           );
         })}
       </div>
-      <div className="tiles" style={{ ['--tile' as string]: zone.primary, ['--tile2' as string]: zone.secondary }}>
+      <div className={`tiles ${levels.length > 4 ? 'five' : ''}`} style={{ ['--tile' as string]: zone.primary, ['--tile2' as string]: zone.secondary }}>
         {levels.map((l) => {
           const best = p.levelBest[String(l.level)];
           const hasGhost = !!p.ghosts[String(l.level)];
@@ -85,6 +87,7 @@ export function PracticePanel({ snap, game, onClose }: { snap: Snapshot; game: G
                 {p.fragments.includes(l.level) && <span title="fragment collected">◆</span>}
                 {hasGhost && <span title="ghost saved">◌</span>}
                 {l.pickup && <span title="reboot core here">⬢</span>}
+                {l.boss && <span title="warden fight">☠</span>}
               </span>
             </button>
           );
@@ -106,7 +109,7 @@ export function RecordsPanel({ snap, game, onClose }: { snap: Snapshot; game: Ga
     ['FASTEST CLEAR', p.bestTime !== null ? fmtTime(p.bestTime) : '--'],
     ['GRAZES', String(p.totalGrazes)],
     ['MAX COMBO', `×${p.maxCombo}`],
-    ['FRAGMENTS', `${p.fragments.length}/20`],
+    ['FRAGMENTS', `${p.fragments.length}/${LEVEL_COUNT}`],
     ['OVERDRIVE', p.overdriveBest ? `${fmtScore(p.overdriveBest.score)} · L${pad2(p.overdriveBest.level)}` : p.overdriveUnlocked ? 'UNLOCKED' : 'LOCKED'],
   ];
   return (

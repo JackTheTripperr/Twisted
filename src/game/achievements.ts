@@ -20,6 +20,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'daily_clear', name: "TODAY'S TWIST", desc: 'Clear a Daily Twist.' },
   { id: 'overdrive_clear', name: 'OVERDRIVEN', desc: 'Clear Overdrive.' },
   { id: 'perfect_sector', name: 'FLAWLESS SECTOR', desc: 'S-rank all four levels of a sector in one run.' },
+  { id: 'warden_down', name: 'WARDEN DOWN', desc: 'Defeat the Warden.' },
+  { id: 'warden_prime', name: 'PRIME DIRECTIVE', desc: 'Defeat Warden Prime.' },
+  { id: 'no_checkpoint', name: 'NO SAFETY NET', desc: 'Clear the run without respawning at the checkpoint.' },
+  { id: 'untouched_boss', name: 'UNTOUCHABLE', desc: 'Beat a Warden fight in under 60 seconds.' },
 ];
 
 export const ACHIEVEMENT_BY_ID: Record<string, AchievementDef> = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));

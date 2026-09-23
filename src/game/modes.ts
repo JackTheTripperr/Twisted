@@ -11,14 +11,17 @@ const MW = 1280;
 export const NO_MUTATORS: Mutators = { mirror: false, tempo: 1, phantom: 1, gateOverride: null };
 export const OVERDRIVE_MUTATORS: Mutators = { mirror: true, tempo: 1.12, phantom: 1.25, gateOverride: null };
 
+/** SPIN only ever appears here: it is a daily-twist modifier, never a level's own gate. */
 const GATE_KINDS: ModifierKind[] = ['UNTWIST', 'TURBO', 'DRAG', 'SWELL', 'BLACKOUT', 'SPIN'];
 
 export const DAILY_LENGTH = 8;
+/** Levels the daily draws from: everything except the tutorial pair and the Warden fights. */
+const DAILY_POOL = Array.from({ length: 38 }, (_, i) => i + 3).filter((n) => n !== 21);
 
 export function dailyPlan(key: string): { levels: number[]; mutators: Mutators } {
   const parts = key.split('-').map((s) => parseInt(s, 10) || 0);
   const rng = mulberry32(hashSeed(parts[0], parts[1], parts[2], 0x0da1));
-  const pool = Array.from({ length: 18 }, (_, i) => i + 3);
+  const pool = DAILY_POOL.slice();
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -28,7 +31,7 @@ export function dailyPlan(key: string): { levels: number[]; mutators: Mutators }
     mirror: rng() < 0.5,
     tempo: 1 + Math.floor(rng() * 4) * 0.04,
     phantom: 1 + Math.floor(rng() * 3) * 0.15,
-    gateOverride: rng() < 0.25 ? GATE_KINDS[Math.floor(rng() * GATE_KINDS.length)] : null,
+    gateOverride: rng() < 0.3 ? GATE_KINDS[Math.floor(rng() * GATE_KINDS.length)] : null,
   };
   return { levels, mutators };
 }
@@ -80,6 +83,24 @@ function mirrorObstacle(d: ObstacleDef): ObstacleDef {
       return { ...d, pts: d.pts.map(mv) };
     case 'bouncer':
       return { ...d, rect: mrect(d.rect), balls: d.balls.map((b) => ({ ...b, x0: mx(b.x0), vx: -b.vx })) };
+    case 'turret':
+      return { ...d, pos: mv(d.pos) };
+    case 'lasergrid':
+      return { ...d, beams: d.beams.map((b) => ({ ...b, x1: mx(b.x1), x2: mx(b.x2) })) };
+    case 'current':
+      return { ...d, rect: mrect(d.rect), vx: -d.vx };
+    case 'mine':
+      return { ...d, pos: mv(d.pos) };
+    case 'serpent':
+      return { ...d, from: mv(d.from), to: mv(d.to) };
+    case 'pendulum':
+      return { ...d, pivot: mv(d.pivot), amp: -d.amp };
+    case 'shutter':
+      return { ...d, rect: mrect(d.rect) };
+    case 'shrink':
+      return { ...d, rect: mrect(d.rect) };
+    case 'boss':
+      return { ...d, box: mrect(d.box) };
   }
 }
 

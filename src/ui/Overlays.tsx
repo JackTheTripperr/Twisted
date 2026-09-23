@@ -27,6 +27,14 @@ export function Overlays({ snap }: { snap: Snapshot }) {
           <div className="cta blink">CLICK TO START</div>
         </div>
       );
+    case 'playing':
+      return snap.bossBanner ? (
+        <div className="overlay boss-banner" key={snap.bossBanner}>
+          <div className="banner-text">
+            <Glitch text={snap.bossBanner} className={snap.bossBanner === 'SURVIVE' ? 'glitch-hard' : ''} />
+          </div>
+        </div>
+      ) : null;
     case 'dying':
       if (snap.mode === 'practice') {
         return (
@@ -61,21 +69,27 @@ export function Overlays({ snap }: { snap: Snapshot }) {
           <div className="death-count">NO REBOOTS · DEATHS {pad2(snap.deaths)}</div>
         </div>
       );
-    case 'clear':
+    case 'clear': {
+      const last = snap.runIndex + 1 >= snap.runLength;
+      const title = snap.boss ? (snap.level === 41 ? 'WARDEN PRIME DOWN' : 'WARDEN DOWN') : last ? (snap.mode === 'practice' ? 'CLEARED' : 'SYSTEM LIBERATED') : 'SECTOR CLEARED';
+      const sub = snap.boss && snap.level === 21
+        ? snap.mode === 'practice'
+          ? snap.levelName
+          : 'CHECKPOINT WRITTEN · THE DEEP FIELD IS OPEN'
+        : last
+          ? snap.mode === 'practice'
+            ? snap.levelName
+            : `ALL ${snap.runLength === LEVEL_COUNT ? '41 LEVELS' : `${snap.runLength} LEVELS`} UNTWISTED`
+          : `NEXT · LEVEL ${pad2(snap.level + (snap.mode === 'daily' ? 0 : 1))}`;
       return (
         <div className="overlay clear" key={`clear-${snap.level}`}>
           <div className="clear-title">
-            <Glitch text={snap.runIndex + 1 >= snap.runLength ? (snap.mode === 'practice' ? 'CLEARED' : 'SYSTEM LIBERATED') : 'SECTOR CLEARED'} />
+            <Glitch text={title} />
           </div>
-          <div className="clear-sub">
-            {snap.runIndex + 1 >= snap.runLength
-              ? snap.mode === 'practice'
-                ? snap.levelName
-                : `ALL ${snap.runLength === LEVEL_COUNT ? '20 SECTORS' : `${snap.runLength} LEVELS`} UNTWISTED`
-              : `NEXT · LEVEL ${pad2(snap.level + (snap.mode === 'daily' ? 0 : 1))}`}
-          </div>
+          <div className="clear-sub">{sub}</div>
         </div>
       );
+    }
     default:
       return null;
   }

@@ -8,7 +8,7 @@
 import type { BeatInfo } from '../audio/engine';
 import type { Course } from '../game/courses';
 import { PLAY } from '../game/courses';
-import type { Clock, Obstacle } from '../game/entities';
+import type { Clock, Obstacle, Ring as GapRing } from '../game/entities';
 import { pointAlong } from '../game/entities';
 import type { Zone } from '../game/levels';
 import { MODIFIER_INFO } from '../game/levels';
@@ -60,6 +60,9 @@ export interface GameView {
   surgeActive: boolean;
   surgeT: number;
   zoom: { x: number; y: number; s: number };
+  /** 0..1 darkness driven by a boss phase */
+  bossBlackout: number;
+  boss: Obstacle | null;
   hasMoved: boolean;
   near: { seg: Segment; d: number }[];
   ghost: boolean;
@@ -88,6 +91,15 @@ interface Ring {
   color: string;
   speed: number;
   width: number;
+  max: number;
+}
+
+interface Arc {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  life: number;
   max: number;
 }
 
@@ -139,6 +151,7 @@ export class Renderer {
 
   private particles: Particle[] = [];
   private floats: FloatText[] = [];
+  private arcs: Arc[] = [];
   private shakeScale = 1;
   private flashScale = 1;
   private zoomState = { x: 640, y: 360, s: 1 };
@@ -333,6 +346,10 @@ export class Renderer {
   chroma(a: number) {
     this.aberr = Math.max(this.aberr, a * this.flashScale);
   }
+  /** A lightning arc between two points, alive for `life` seconds. */
+  arc(x1: number, y1: number, x2: number, y2: number, life = 0.45) {
+    this.arcs.push({ x1, y1, x2, y2, life, max: life });
+  }
   floatText(x: number, y: number, text: string, color: string, size = 16) {
     this.floats.push({ x, y, text, color, size, life: 1.1, max: 1.1 });
   }
@@ -448,6 +465,7 @@ export class Renderer {
       this.drawPickup(g, view, beat, reveal);
       this.drawFragment(g, view, beat, reveal);
       this.drawRings(g);
+      this.drawArcs(g, view);
       this.drawTrail(g, view);
       this.drawGhost(g, view);
       this.drawPhantom(g, view);
@@ -988,30 +1006,7 @@ export class Renderer {
           break;
         }
         case 'pulser': {
-          const gapHalf = ((d.gapWidth / 2) * Math.PI) / 180;
-          for (const ring of o.rings) {
-            const a = 0.35 + 0.65 * (1 - ring.R / d.maxR);
-            g.save();
-            g.globalCompositeOperation = 'lighter';
-            g.lineCap = 'round';
-            g.strokeStyle = sec;
-            for (const [lw, al] of [
-              [(d.t ?? 8) * 3, 0.15],
-              [d.t ?? 8, 0.9],
-            ]) {
-              g.lineWidth = lw;
-              g.globalAlpha = a * al;
-              g.beginPath();
-              for (let i = 0; i < d.gaps; i++) {
-                const g0 = ring.gapA + (TAU * i) / d.gaps + gapHalf;
-                const g1 = ring.gapA + (TAU * (i + 1)) / d.gaps - gapHalf;
-                g.moveTo(d.center.x + Math.cos(g0) * ring.R, d.center.y + Math.sin(g0) * ring.R);
-                g.arc(d.center.x, d.center.y, ring.R, g0, g1);
-              }
-              g.stroke();
-            }
-            g.restore();
-          }
+          this.drawGapRings(g, o.rings, sec, d.maxR);
           this.disc(g, d.center.x, d.center.y, d.core ?? 14, sec, 0.9);
           break;
         }
@@ -1146,8 +1141,450 @@ export class Renderer {
           for (const b of o.discs) this.disc(g, b.x, b.y, b.r, sec);
           break;
         }
+        case 'turret': {
+          const p = d.pos;
+          g.save();
+          // base + barrel
+          g.strokeStyle = rgba(pri, 0.8);
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(p.x, p.y, 16, 0, TAU);
+          g.stroke();
+          g.strokeStyle = sec;
+          g.lineWidth = 6;
+          g.lineCap = 'round';
+          g.beginPath();
+          g.moveTo(p.x + o.aim.x * 6, p.y + o.aim.y * 6);
+          g.lineTo(p.x + o.aim.x * 22, p.y + o.aim.y * 22);
+          g.stroke();
+          if (o.charge > 0) {
+            // charge telegraph: shrinking ring + faint aim line
+            g.globalCompositeOperation = 'lighter';
+            g.strokeStyle = sec;
+            g.lineWidth = 2;
+            g.globalAlpha = 0.4 + o.charge * 0.6;
+            g.beginPath();
+            g.arc(p.x, p.y, 16 + (1 - o.charge) * 26, 0, TAU);
+            g.stroke();
+            g.setLineDash([4, 8]);
+            g.globalAlpha = 0.25 * o.charge;
+            g.lineWidth = 1;
+            g.beginPath();
+            g.moveTo(p.x, p.y);
+            g.lineTo(p.x + o.aim.x * 900, p.y + o.aim.y * 900);
+            g.stroke();
+          }
+          g.restore();
+          this.disc(g, p.x, p.y, 9, sec, 0.9);
+          for (const b of o.projectiles) {
+            g.save();
+            g.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < b.trail.length; i++) {
+              const t = b.trail[i];
+              g.globalAlpha = (i / b.trail.length) * 0.35;
+              g.fillStyle = sec;
+              g.beginPath();
+              g.arc(t.x, t.y, b.r * (0.4 + (i / b.trail.length) * 0.6), 0, TAU);
+              g.fill();
+            }
+            g.restore();
+            this.disc(g, b.x, b.y, b.r, sec);
+          }
+          break;
+        }
+        case 'lasergrid': {
+          const nodes = new Set<string>();
+          d.beams.forEach((bm, i) => {
+            nodes.add(`${bm.x1},${bm.y1}`);
+            nodes.add(`${bm.x2},${bm.y2}`);
+            const st = o.beamState[i];
+            if (st === 'on') {
+              const s: Segment = { x1: bm.x1, y1: bm.y1, x2: bm.x2, y2: bm.y2, ht: (d.t ?? 6) / 2 };
+              this.bar(g, s, sec);
+            } else {
+              g.save();
+              g.strokeStyle = st === 'warn' ? rgba(sec, 0.35 + 0.55 * Math.abs(Math.sin(this.time * 18))) : rgba(pri, 0.14);
+              g.setLineDash(st === 'warn' ? [6, 6] : [2, 10]);
+              g.lineWidth = st === 'warn' ? 2 : 1;
+              g.beginPath();
+              g.moveTo(bm.x1, bm.y1);
+              g.lineTo(bm.x2, bm.y2);
+              g.stroke();
+              g.restore();
+            }
+          });
+          g.save();
+          g.fillStyle = pri;
+          for (const n of nodes) {
+            const [x, y] = n.split(',').map(Number);
+            g.fillRect(x - 4, y - 4, 8, 8);
+          }
+          g.restore();
+          break;
+        }
+        case 'current': {
+          const r = d.rect;
+          g.save();
+          g.beginPath();
+          g.rect(r.x, r.y, r.w, r.h);
+          g.clip();
+          g.fillStyle = rgba(pri, 0.05);
+          g.fillRect(r.x, r.y, r.w, r.h);
+          g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = rgba(pri, 0.35);
+          g.lineWidth = 1.5;
+          const len = Math.hypot(d.vx, d.vy) || 1;
+          const ux = d.vx / len;
+          const uy = d.vy / len;
+          const px = -uy;
+          const py = ux;
+          const spacing = 46;
+          const scroll = (this.time * len * 0.6) % spacing;
+          const along = Math.abs(ux) > Math.abs(uy) ? r.w : r.h;
+          const across = Math.abs(ux) > Math.abs(uy) ? r.h : r.w;
+          const cx = r.x + r.w / 2;
+          const cy = r.y + r.h / 2;
+          for (let a = -along / 2 - spacing; a < along / 2 + spacing; a += spacing) {
+            for (let b = -across / 2 + 20; b < across / 2; b += 40) {
+              const x = cx + ux * (a + scroll) + px * b;
+              const y = cy + uy * (a + scroll) + py * b;
+              g.beginPath();
+              g.moveTo(x - ux * 8 - px * 7, y - uy * 8 - py * 7);
+              g.lineTo(x + ux * 4, y + uy * 4);
+              g.lineTo(x - ux * 8 + px * 7, y - uy * 8 + py * 7);
+              g.stroke();
+            }
+          }
+          g.restore();
+          g.save();
+          g.setLineDash([4, 6]);
+          g.strokeStyle = rgba(pri, 0.3);
+          g.lineWidth = 1;
+          g.strokeRect(r.x, r.y, r.w, r.h);
+          g.restore();
+          break;
+        }
+        case 'mine': {
+          if (o.mineState === 'spent') break;
+          const p = d.pos;
+          g.save();
+          g.setLineDash([3, 5]);
+          g.strokeStyle = rgba(o.mineState === 'armed' ? RED : sec, o.mineState === 'armed' ? 0.7 : 0.25);
+          g.lineWidth = 1;
+          g.beginPath();
+          g.arc(p.x, p.y, d.trigger, 0, TAU);
+          g.stroke();
+          g.restore();
+          if (o.mineState === 'armed') {
+            const blink = Math.abs(Math.sin(this.time * 40)) > 0.5;
+            this.disc(g, p.x, p.y, 8, blink ? '#ffffff' : RED);
+            g.save();
+            g.strokeStyle = RED;
+            g.lineWidth = 2;
+            g.globalAlpha = 0.8;
+            g.beginPath();
+            g.arc(p.x, p.y, 8 + (o.fuse / (d.fuse ?? 0.55)) * 24, 0, TAU);
+            g.stroke();
+            g.restore();
+          } else if (o.mineState === 'blast') {
+            this.drawGapRings(g, o.rings, RED, d.blastR * 1.4);
+            g.save();
+            g.globalCompositeOperation = 'lighter';
+            g.globalAlpha = 1 - o.blast;
+            const fl = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, d.blastR * o.blast);
+            fl.addColorStop(0, 'rgba(255,255,255,0.5)');
+            fl.addColorStop(1, rgba(RED, 0));
+            g.fillStyle = fl;
+            g.beginPath();
+            g.arc(p.x, p.y, d.blastR * o.blast, 0, TAU);
+            g.fill();
+            g.restore();
+          } else {
+            this.disc(g, p.x, p.y, 7, sec, 0.8);
+            g.save();
+            g.fillStyle = '#ffffff';
+            g.globalAlpha = 0.5 + 0.5 * Math.sin(this.time * 3 + p.x);
+            g.beginPath();
+            g.arc(p.x, p.y, 2, 0, TAU);
+            g.fill();
+            g.restore();
+          }
+          break;
+        }
+        case 'serpent': {
+          if (o.discs.length > 1) {
+            g.save();
+            g.globalCompositeOperation = 'lighter';
+            g.strokeStyle = rgba(sec, 0.35);
+            g.lineWidth = d.segR * 1.4;
+            g.lineCap = 'round';
+            g.lineJoin = 'round';
+            g.beginPath();
+            g.moveTo(o.discs[0].x, o.discs[0].y);
+            for (let i = 1; i < o.discs.length; i++) g.lineTo(o.discs[i].x, o.discs[i].y);
+            g.stroke();
+            g.restore();
+          }
+          o.discs.forEach((b, i) => this.disc(g, b.x, b.y, b.r, i === 0 ? '#ffffff' : sec, i === 0 ? 1 : 0.9));
+          break;
+        }
+        case 'pendulum': {
+          g.save();
+          g.strokeStyle = rgba(pri, 0.25);
+          g.setLineDash([3, 6]);
+          g.lineWidth = 1;
+          g.beginPath();
+          const a0 = Math.PI / 2 - (d.amp * Math.PI) / 180;
+          const a1 = Math.PI / 2 + (d.amp * Math.PI) / 180;
+          g.arc(d.pivot.x, d.pivot.y, d.length, Math.min(a0, a1), Math.max(a0, a1));
+          g.stroke();
+          g.restore();
+          for (const s2 of o.caps) this.bar(g, s2, sec);
+          g.save();
+          g.strokeStyle = pri;
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(d.pivot.x, d.pivot.y, 7, 0, TAU);
+          g.stroke();
+          g.restore();
+          for (const b of o.discs) this.disc(g, b.x, b.y, b.r, sec);
+          break;
+        }
+        case 'shutter': {
+          const r = d.rect;
+          g.save();
+          if (o.doorState === 'closed') {
+            g.globalCompositeOperation = 'lighter';
+            g.fillStyle = rgba(sec, 0.18 + beat.kick * 0.08);
+            g.fillRect(r.x, r.y, r.w, r.h);
+            g.restore();
+            for (const s2 of o.caps) this.bar(g, s2, sec);
+          } else if (o.doorState === 'warn') {
+            g.strokeStyle = rgba(sec, 0.35 + 0.6 * Math.abs(Math.sin(this.time * 18)));
+            g.setLineDash([6, 6]);
+            g.lineWidth = 2;
+            g.strokeRect(r.x, r.y, r.w, r.h);
+            g.restore();
+          } else {
+            g.strokeStyle = rgba(pri, 0.16);
+            g.setLineDash([2, 8]);
+            g.lineWidth = 1;
+            g.strokeRect(r.x, r.y, r.w, r.h);
+            g.restore();
+          }
+          break;
+        }
+        case 'shrink': {
+          const r = o.curRect;
+          g.save();
+          g.globalCompositeOperation = 'lighter';
+          const inset = 26;
+          const grad = g.createLinearGradient(r.x, r.y, r.x + inset, r.y);
+          grad.addColorStop(0, rgba(RED, 0.2 + o.ext * 0.3));
+          grad.addColorStop(1, rgba(RED, 0));
+          g.fillStyle = grad;
+          g.fillRect(r.x, r.y, inset, r.h);
+          g.restore();
+          for (const s2 of o.caps) this.bar(g, s2, pri);
+          this.label(g, 'COMPRESSION', r.x + r.w / 2, r.y + 14, 9, RED, 0.5 + o.ext * 0.4, 4);
+          break;
+        }
+        case 'boss': {
+          this.drawBoss(g, view, o, beat);
+          break;
+        }
       }
     }
+  }
+
+  private drawBoss(g: CanvasRenderingContext2D, view: GameView, o: Obstacle, beat: BeatInfo) {
+    const d = o.def as { box: { x: number; y: number; w: number; h: number }; tier: number };
+    const b = o.boss!;
+    const bx = b.boxX;
+    const by = d.box.y;
+    const cx = bx + d.box.w / 2;
+    const cy = by + d.box.h / 2;
+    const kick = beat.kick;
+    // hp shells: nested outlines around the box
+    g.save();
+    for (let i = 0; i < b.hp; i++) {
+      const pad = 8 + i * 9;
+      g.strokeStyle = rgba(RED, 0.35 + kick * 0.3 - i * 0.05);
+      g.lineWidth = 2;
+      g.setLineDash([12, 6]);
+      g.lineDashOffset = -this.time * 30 * (i % 2 ? -1 : 1);
+      this.roundRect(g, bx - pad, by - pad + 6, d.box.w + pad * 2, d.box.h + pad * 2 - 6, 6);
+      g.stroke();
+    }
+    g.restore();
+    // box body
+    g.save();
+    g.fillStyle = b.dead ? 'rgba(20,4,10,0.85)' : 'rgba(40,2,14,0.75)';
+    g.fillRect(bx, by, d.box.w, d.box.h);
+    if (!b.dead) {
+      // the eye: concentric rings and a slit that tracks the player
+      const ang = Math.atan2(view.cursor.y - cy, view.cursor.x - cx);
+      g.globalCompositeOperation = 'lighter';
+      const halo = g.createRadialGradient(cx, cy, 4, cx, cy, 70);
+      halo.addColorStop(0, rgba(RED, 0.6 + kick * 0.3));
+      halo.addColorStop(1, rgba(RED, 0));
+      g.fillStyle = halo;
+      g.beginPath();
+      g.arc(cx, cy, 70, 0, TAU);
+      g.fill();
+      for (let i = 1; i <= 3; i++) {
+        g.strokeStyle = rgba(i === 1 ? '#ffffff' : RED, 0.7 - i * 0.15);
+        g.lineWidth = 2;
+        g.beginPath();
+        g.arc(cx, cy, 8 + i * 9 + Math.sin(b.eye * 3 + i) * 2, 0, TAU);
+        g.stroke();
+      }
+      g.strokeStyle = '#ffffff';
+      g.lineWidth = 3;
+      g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(cx + Math.cos(ang) * 4, cy + Math.sin(ang) * 4);
+      g.lineTo(cx + Math.cos(ang) * 16, cy + Math.sin(ang) * 16);
+      g.stroke();
+      if (b.hitT > 0) {
+        // respite: the box flickers
+        g.fillStyle = rgba('#ffffff', 0.12 * Math.abs(Math.sin(this.time * 30)));
+        g.fillRect(bx, by, d.box.w, d.box.h);
+      }
+      this.label(g, d.tier === 2 ? 'WARDEN PRIME' : 'WARDEN', cx, by + d.box.h - 12, 8, RED, 0.8, 4);
+    } else {
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = rgba(RED, 0.4);
+      g.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        g.beginPath();
+        g.moveTo(cx + Math.cos(i * 1.1) * 12, cy + Math.sin(i * 1.1) * 8);
+        g.lineTo(cx + Math.cos(i * 1.1 + 0.4) * 60, cy + Math.sin(i * 1.1 + 0.4) * 40);
+        g.stroke();
+      }
+      if (Math.random() < 0.3) this.sparks(bx + Math.random() * d.box.w, by + Math.random() * d.box.h, 0, -40, Math.random() < 0.5 ? RED : '#ffffff', 2);
+      this.label(g, 'OFFLINE', cx, cy, 10, '#ffffff', 0.6, 5);
+    }
+    g.restore();
+    // everything it throws
+    for (const s2 of o.caps) this.bar(g, s2, RED);
+    this.drawGapRings(g, o.rings, RED, 720);
+    for (const p of b.projectiles) {
+      if (p.kind === 'seeker') this.drawHunter(g, p, p.r, p.trail, 1, RED);
+      else if (p.kind === 'bolt') {
+        g.save();
+        g.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < p.trail.length; i++) {
+          const t = p.trail[i];
+          g.globalAlpha = (i / p.trail.length) * 0.35;
+          g.fillStyle = RED;
+          g.beginPath();
+          g.arc(t.x, t.y, p.r * (0.4 + (i / p.trail.length) * 0.6), 0, TAU);
+          g.fill();
+        }
+        g.restore();
+        this.disc(g, p.x, p.y, p.r, RED);
+      }
+    }
+    // the weak point at the spiral's centre
+    if (b.pickup) {
+      const { x, y } = b.pickup;
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      const halo = g.createRadialGradient(x, y, 0, x, y, 40);
+      halo.addColorStop(0, `rgba(255,255,255,${(0.45 + kick * 0.3).toFixed(3)})`);
+      halo.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = halo;
+      g.beginPath();
+      g.arc(x, y, 40, 0, TAU);
+      g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.translate(x, y);
+      g.rotate(this.time * 1.5);
+      g.strokeStyle = '#ffffff';
+      g.lineWidth = 2;
+      g.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * TAU;
+        if (i === 0) g.moveTo(Math.cos(a) * 12, Math.sin(a) * 12);
+        else g.lineTo(Math.cos(a) * 12, Math.sin(a) * 12);
+      }
+      g.closePath();
+      g.stroke();
+      g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.arc(x, y, 4 + kick * 2, 0, TAU);
+      g.fill();
+      g.restore();
+      this.label(g, 'BREACH', x, y + 26, 8, '#ffffff', 0.85, 3);
+    }
+  }
+
+  private drawGapRings(g: CanvasRenderingContext2D, rings: GapRing[], color: string, fadeR: number) {
+    for (const ring of rings) {
+      const a = 0.35 + 0.65 * Math.max(0, 1 - ring.R / fadeR);
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.lineCap = 'round';
+      g.strokeStyle = color;
+      for (const [lw, al] of [
+        [ring.ht * 6, 0.15],
+        [ring.ht * 2, 0.9],
+      ]) {
+        g.lineWidth = lw;
+        g.globalAlpha = a * al;
+        g.beginPath();
+        if (ring.gaps <= 0) {
+          g.arc(ring.x, ring.y, ring.R, 0, TAU);
+        } else {
+          for (let i = 0; i < ring.gaps; i++) {
+            const g0 = ring.gapA + (TAU * i) / ring.gaps + ring.gapHalf;
+            const g1 = ring.gapA + (TAU * (i + 1)) / ring.gaps - ring.gapHalf;
+            g.moveTo(ring.x + Math.cos(g0) * ring.R, ring.y + Math.sin(g0) * ring.R);
+            g.arc(ring.x, ring.y, ring.R, g0, g1);
+          }
+        }
+        g.stroke();
+      }
+      g.restore();
+    }
+  }
+
+  private drawArcs(g: CanvasRenderingContext2D, view: GameView) {
+    if (!this.arcs.length) return;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const a of this.arcs) {
+      const k = a.life / a.max;
+      const dx = a.x2 - a.x1;
+      const dy = a.y2 - a.y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      for (const [lw, col, al] of [
+        [10, view.zone.secondary, 0.25],
+        [3, '#ffffff', 0.9],
+      ] as [number, string, number][]) {
+        g.strokeStyle = col;
+        g.lineWidth = lw;
+        g.globalAlpha = k * al;
+        g.beginPath();
+        g.moveTo(a.x1, a.y1);
+        const n = 12;
+        for (let i = 1; i < n; i++) {
+          const t = i / n;
+          const jitter = (Math.random() - 0.5) * 34 * Math.sin(t * Math.PI);
+          g.lineTo(a.x1 + dx * t + nx * jitter, a.y1 + dy * t + ny * jitter);
+        }
+        g.lineTo(a.x2, a.y2);
+        g.stroke();
+      }
+    }
+    g.restore();
+    this.arcs = this.arcs.filter((a) => (a.life -= 1 / 60) > 0);
   }
 
   private drawCrushFill(g: CanvasRenderingContext2D, path: Vec[], width: number, front: number, lens: number[]) {
@@ -1283,6 +1720,7 @@ export class Renderer {
   private drawGoal(g: CanvasRenderingContext2D, view: GameView, beat: BeatInfo) {
     const course = view.course!;
     const zone = view.zone;
+    if (view.boss && !(view.boss.boss?.dead && view.boss.boss.deadT > 1.2)) return;
     const { x, y } = course.goal;
     const R = course.goalR;
     const kick = beat.kick;
@@ -1665,7 +2103,7 @@ export class Renderer {
 
   private drawBlackout(g: CanvasRenderingContext2D, view: GameView, dt: number) {
     const zs = view.zoneState;
-    let target = 0;
+    let target = view.bossBlackout;
     if (zs && zs.kind === 'BLACKOUT') target = 1;
     else if (view.course && view.phase === 'playing') {
       // dim ahead of a blackout zone so the player sees it coming

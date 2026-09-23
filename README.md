@@ -11,7 +11,9 @@ Initial commit is a Fable 5.1 1-shot, exact prompt:
 Version 2 turned the mazes into obstacle courses, made the glitch modifiers
 spatial gate nodes, and added reboot cores. Version 3 added the graze and surge
 systems, scoring and ranks, practice / daily / overdrive modes, a persistent
-profile with achievements, ghosts, a story layer, and a full menu.
+profile with achievements, ghosts, a story layer, and a full menu. Version 4
+added the Warden boss fights (levels 21 and 41), sectors 06–10 with nine new
+obstacle types, and the checkpoint the Warden leaves behind.
 
 A neon cyberpunk obstacle course where your mouse is lying to you. Every
 movement is inverted, everything neon is lethal, and dying sends you back to
@@ -52,8 +54,8 @@ The dev server is pinned to **http://localhost:3004** (`--strictPort`).
 
 | Mode | What it is |
 | --- | --- |
-| **The Run** | All 20 sectors, one life, reboot cores as your only safety net. Clearing it unlocks Overdrive. |
-| **Practice** | Any sector you have reached in a run. Deaths restart the level. Best times save a **ghost** you can race. |
+| **The Run** | All 41 levels, one life, reboot cores as your safety net, and one checkpoint: beat the Warden on level 21 and a lost run can respawn at level 22. Clearing it unlocks Overdrive. |
+| **Practice** | Any of the ten sectors you have reached in a run. Deaths restart the level. Best times save a **ghost** you can race. |
 | **Daily Twist** | A seeded 8-level gauntlet that changes every day, with mutators (mirrored, faster tempo, faster phantoms, gate overrides). One best score per day. |
 | **Overdrive** | New Game+: every level mirrored, the soundtrack 12 % faster (obstacles follow the beat, so they are faster too), phantoms 25 % faster. |
 
@@ -72,12 +74,12 @@ history, the daily best, and 19 **achievements** that pop as toasts in play.
 **Options** cover mouse sensitivity, music and SFX volume, screen shake, full or
 reduced flashing, scanlines, and the best-run ghost.
 
-## The 20 sectors
+## The 41 levels
 
-Every course is hand-authored in `src/game/courses.ts` and fixed between runs,
-so layouts can be learned. All obstacle motion is expressed in **beats**, and the
-tempo climbs from 126 to 142 BPM across the five sectors, so everything gets
-faster as the soundtrack escalates.
+Every course is hand-authored (`src/game/courses.ts` for 1–20, `courses2.ts`
+for 21–41) and fixed between runs, so layouts can be learned. All obstacle
+motion is expressed in **beats**, and the tempo climbs from 126 to 150 BPM
+across the sectors, so everything gets faster as the soundtrack escalates.
 
 | # | Level | New mechanic |
 | --- | --- | --- |
@@ -99,8 +101,29 @@ faster as the soundtrack escalates.
 | 16 | SEGFAULT | The one maze, collapsing along your path, with doors at junctions. |
 | 17 | EVENT HORIZON | A field of gravity wells; a BLACKOUT gate hides them. |
 | 18 | TOTAL RECALL | Everything at once inside a corridor that **breathes** with the kick. |
-| 19 | CORE MELTDOWN | SPIN gate into a spiral with a decaying signal. |
+| 19 | CORE MELTDOWN | The reactor: a three-arm spinner around the goal, rings from the centre, corner lasers, a TURBO gate with a decaying signal. |
 | 20 | ANNIHILATION | Collapsing S-corridor, seekers, spinners, doors, two gates. Reboot core #4. |
+| 21 | THE WARDEN | Boss. **SURVIVE** while it launches bolts, bars, rings and seekers from its box; grab the breach core at the centre of the roaming spiral three times. Writes the checkpoint. |
+| 22 | AFTERSHOCK | **Turrets** that lead your movement; pillars block their bolts. |
+| 23 | LATTICE | A **laser lattice** whose beam groups cycle on the beat. |
+| 24 | UNDERTOW | **Currents** that push against you, plus pistons and doors. |
+| 25 | MINEFIELD | **Proximity mines** with a DRAG gate. Reboot core #5 in the densest cluster. |
+| 26 | SERPENT | Two **serpents** snaking across the arena. |
+| 27 | PENDULUM | Four **pendulums** in a wide hall. |
+| 28 | SHUTTER | **Phasing blocks** that reconfigure the room every two bars, with an UNTWIST gate. |
+| 29 | COMPRESSION | A **shrinking arena** with orbiters and corner lasers; the goal is at the centre. |
+| 30 | TWIN SPIRALS | Counter-rotating spirals. Reboot core #6 in the first, the goal in the second. |
+| 31 | CROSSFIRE | Turrets and a laser over pillar cover, with a BLACKOUT gate. |
+| 32 | RIPTIDE | Collapsing corridor with currents running against every leg. |
+| 33 | SWARM | Short-lived seekers that keep respawning, and a door. |
+| 34 | LATTICE II | A faster lattice with gravity wells inside the cells and a DRAG gate. |
+| 35 | MINE SHAFT | Winding corridor of mines and pistons. Reboot core #7 in a pocket guarded by a pendulum. |
+| 36 | REFLECTION | A room split in two: a serpent above, turrets below, a SWELL gate across both. |
+| 37 | GRAVITY STORM | Four wells, an orbiter ring, vertical currents and two turrets. |
+| 38 | ENDGAME I | Lattice, doors, turrets and a crush wall in one corridor. |
+| 39 | ENDGAME II | Twin spirals and a vertical serpent inside a shrinking room. |
+| 40 | ENDGAME III | The final hallway: mines, a pendulum, a turret, gates, doors, a serpent, a crush wall. Reboot core #8. |
+| 41 | WARDEN PRIME | Final boss: four breach cores, a sliding box, twin lasers, a blackout phase and a phantom. |
 
 ### Gates
 
@@ -119,22 +142,36 @@ hallway (level 14) and a decaying signal bar (level 19).
 | DRAG | Cursor speed ×0.4 |
 | SWELL | Cursor grows ×1.9 |
 | BLACKOUT | Only a small radius around the orb is visible |
-| SPIN | Inputs rotated 90° on top of the inversion |
+| SPIN | Inputs rotated 90° on top of the inversion (Daily Twist only) |
 
-### Reboot cores
+### Reboot cores and the checkpoint
 
-Levels 05, 10, 15 and 20 each hide one **reboot core**, always off the main
-route and behind extra hazards. Cores stack up to three and carry forward. Dying
-with a core consumes it and resumes the same level from its start pad (that
-level's core does not reappear). Dying without one ends the run.
+Every fifth level hides one **reboot core**, always off the main route and behind
+extra hazards. Cores stack up to three and carry forward. Dying with a core
+consumes it and resumes the same level from its start pad (that level's core
+does not reappear). Dying without one ends the run, unless the Warden has
+already fallen this run: then the game-over screen offers a respawn at level 22
+that keeps your score and results.
+
+### The Warden fights
+
+Levels 21 and 41 are boss arenas. The Warden sits in a box at the top of the
+room and launches aimed bolts, falling bars, gapped rings, seekers and a laser.
+Every few bars it drops a **roaming spiral**; the glowing **breach core** at its
+centre is the Warden's weak point. Grab it and a lightning arc strips one shell
+off the box, the arena clears for a breath, and the next, harder phase begins.
+Three hits end the Warden; Warden Prime takes four, slides its box along the
+top, fires twin lasers, blacks out the room and releases a phantom.
 
 ## Story
 
 The WARDEN, the security intelligence of the system you were couriering
-through, hijacked your neural link and inverted the interface. Each sector is a
-layer of its core; the phantoms are cut from your own movement logs; the reboot
-cores are cached copies of your unhijacked self. It talks to you at every level,
-briefs you at every sector, and has something to say about every way you die.
+through, hijacked your neural link and inverted the interface. The first five
+sectors are the layers of its outer core; you meet it in person on level 21,
+then push through the five sectors beyond it to Warden Prime. The phantoms are
+cut from your own movement logs; the reboot cores are cached copies of your
+unhijacked self. It talks to you at every level, briefs you at every sector, and
+has something to say about every way you die.
 
 ## Audio
 
@@ -183,7 +220,8 @@ src/
   audio/engine.ts       procedural music + SFX + beat clock
   game/engine.ts        state machine, modes, movement, gates, graze, surge, records
   game/entities.ts      obstacle catalog: definitions, evaluation, collision
-  game/courses.ts       the 20 hand-authored courses (+ fragments)
+  game/courses.ts       levels 1–20 (+ fragments)
+  game/courses2.ts      levels 21–41: the Warden, sectors 06–10, Warden Prime
   game/modes.ts         daily plan, Overdrive mutators, course mirroring
   game/score.ts         par times, scoring, ranks
   game/story.ts         transmissions, briefings, taunts, ending

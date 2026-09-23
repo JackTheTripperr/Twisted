@@ -5,10 +5,13 @@ import { fmtTime, pad2 } from './bits';
 
 export { fmtTime } from './bits';
 
+const PHASES = ['I', 'II', 'III', 'IV', 'V'];
+
 export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
   const z = snap.zone;
   const info = z ? MODIFIER_INFO[z.kind] : null;
   const modeTag = snap.mode === 'daily' ? 'DAILY' : snap.mode === 'overdrive' ? 'OVERDRIVE' : snap.mode === 'practice' ? 'PRACTICE' : null;
+  const boss = snap.boss;
   return (
     <>
       <div className="hud">
@@ -43,6 +46,17 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
               </span>
             )}
           </div>
+          {boss && (
+            <div className={`boss-bar ${boss.dead ? 'dead' : ''}`}>
+              <span className="boss-name">{snap.level === 41 ? 'WARDEN PRIME' : 'THE WARDEN'}</span>
+              <span className="shells" aria-label={`${boss.hp} of ${boss.maxHp}`}>
+                {Array.from({ length: boss.maxHp }, (_, i) => (
+                  <span key={i} className={`shell ${i < boss.hp ? 'on' : ''}`} />
+                ))}
+              </span>
+              <span className="boss-phase">{boss.dead ? 'OFFLINE' : `PHASE ${PHASES[boss.phase - 1] ?? boss.phase}`}</span>
+            </div>
+          )}
           {z && info && (
             <div className="mod-chip mod-active" style={{ ['--mod' as string]: info.color }}>
               <span className="mod-name">{info.label} GATE</span>

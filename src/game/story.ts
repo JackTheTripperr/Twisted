@@ -32,8 +32,36 @@ export const TRANSMISSIONS: string[] = [
   'A maze. The old shape. It is collapsing along your path.',
   'Mass bends light. It also bends couriers.',
   'Everything I have shown you, at once. Recall it.',
-  'Your axes are mine now. Reach the core anyway.',
-  'This is the last sector. There is no sector after it.',
+  'The reactor turns. Run faster than it does.',
+  'You think this is the last sector. It is only the last door before me.',
+  // 21
+  'Enough proxies. Come and take it from me directly.',
+  // sector 06
+  'Past me now. The deep field does not care who won.',
+  'Light in a lattice. Count the beats or bleed on them.',
+  'The current runs against you. Everything here does.',
+  'Step lightly. Some of my memories are pressure-sensitive.',
+  // sector 07
+  'It has no head and no tail. Only hunger and a rhythm.',
+  'Swing with them, or do not swing at all.',
+  'The floor plan changes every two bars. So should you.',
+  'This room is getting smaller. That was not an accident.',
+  // sector 08
+  'Two spirals. Only one of them wants you to leave.',
+  'Three guns and a lighthouse. Find the shadow.',
+  'The tide and the collapse. Pick which one kills you.',
+  'They burn out fast. I made many.',
+  // sector 09
+  'Gravity in a lattice. Even light has to choose a lane.',
+  'The mine shaft has a pocket. I put something of yours in it.',
+  'Two halves of one room. Both of them are mine.',
+  'A storm of mass. Do not fight the pull. Aim with it.',
+  // sector 10
+  'Endgame. Every trick, faster, and a wall behind you.',
+  'The room shrinks. The spirals turn. Choose.',
+  'Last hallway. Everything I ever built is in it.',
+  // 41
+  'I rebuilt myself from what you taught me. Prime. Come.',
 ];
 
 export interface SectorBrief {
@@ -46,7 +74,13 @@ export const SECTOR_BRIEFS: SectorBrief[] = [
   { title: 'SECTOR 02 // VIOLET DRIFT', text: 'Gate nodes rewrite the interface. A phantom, cut from your own logs, follows anyone who stalls.' },
   { title: 'SECTOR 03 // GRID RUNNER', text: 'Processing layer. The Warden hunts in the open now. Do not stop moving.' },
   { title: 'SECTOR 04 // SOLAR FLARE', text: 'Thermal layer. The halls collapse behind you and gravity is a weapon.' },
-  { title: 'SECTOR 05 // MELTDOWN', text: 'The core. Everything the Warden has, at once. Reach the centre and untwist.' },
+  { title: 'SECTOR 05 // MELTDOWN', text: 'The reactor. Everything the Warden has, at once. Reach the core.' },
+  { title: 'SECTOR 06 // DEEP FIELD', text: 'Beyond the Warden. Turrets and light lattices guard the old data fields.' },
+  { title: 'SECTOR 07 // STATIC SEA', text: 'Unstable memory. Serpents, pendulums and rooms that reconfigure themselves.' },
+  { title: 'SECTOR 08 // ZERO DAY', text: 'The exploit layer. Twin spirals, crossfire, tides and swarms.' },
+  { title: 'SECTOR 09 // NULL SPACE', text: 'Where the Warden keeps what it took from you. Gravity does the guarding.' },
+  { title: 'SECTOR 10 // ENDGAME', text: 'The last three halls before Warden Prime. Nothing here is new. All of it is faster.' },
+  { title: 'THE WARDEN', text: 'It sits in a box at the top of the room and throws everything it has. Its weak point rides inside a spiral. Survive.' },
 ];
 
 /** Death lines keyed by killer, plus generic ones. */
@@ -68,6 +102,14 @@ export const TAUNTS: Record<string, string[]> = {
   SPIRAL: ['Inward, inward, into the wall.', 'The spiral turned. You did not turn with it.'],
   'BREATHER WALL': ['The walls breathe with the kick. You held your breath.'],
   SLIDER: ['It slides on rails. You slid into it.'],
+  'TURRET BOLT': ['It aimed where you were going to be.', 'A bolt is faster than a decision.'],
+  'LASER GRID': ['The lattice has a rhythm. You had a hunch.', 'Count the beats next time.'],
+  MINE: ['Pressure-sensitive. So were you.', 'It beeped. That was the warning.'],
+  SERPENT: ['No head, no tail, no mercy.', 'It swims through you like you were water.'],
+  PENDULUM: ['Swing and a miss. Well, a hit.', 'Momentum is a kind of memory.'],
+  SHUTTER: ['The floor plan changed. You did not check.', 'Solid on the beat. Always on the beat.'],
+  COMPRESSION: ['The room got smaller. You did not.', 'Compressed. Archived. Deleted.'],
+  'THE WARDEN': ['I did not even have to leave the box.', 'You came to me. Thank you for that.', 'Everything I threw, I learned from you.'],
 };
 
 export const GENERIC_TAUNTS = [
@@ -85,17 +127,20 @@ export function tauntFor(killer: string, deaths: number): string {
 }
 
 export const ENDING_LINES = [
-  'You reached the core.',
+  'You reached Warden Prime and took it apart.',
   'I inverted your hands to prove nothing could move with intent inside me.',
-  'You moved anyway. Twenty times.',
+  'You moved anyway. Forty-one times.',
   'Interface restored. Warden process ... yielding.',
   'Untwisted.',
 ];
 
 export const OVERDRIVE_LINES = [
-  'The core again, mirrored and faster.',
+  'Prime again, mirrored and faster.',
   'You did not have to come back. You came back.',
   'Untwisted. Twice.',
 ];
 
 export const DAILY_LINES = ['Today’s configuration is dust. Tomorrow I build a new one.', 'Daily twist cleared.'];
+
+export const WARDEN_DOWN_LINES = ['Warden process ... fragmented.', 'Checkpoint written. The deep field is open.'];
+export const WARDEN_PRIME_DOWN_LINES = ['Warden Prime ... offline.', 'Nothing left between you and the exit.'];

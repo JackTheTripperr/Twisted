@@ -1,7 +1,11 @@
 import type { Rank } from './types';
 
 /** Par time in seconds per level; beating par earns the time bonus and the rank. */
-export const PAR: number[] = [12, 22, 24, 20, 32, 26, 28, 30, 36, 32, 30, 48, 38, 44, 42, 52, 46, 48, 64, 80];
+export const PAR: number[] = [
+  12, 22, 24, 20, 32, 26, 28, 30, 36, 32, 30, 34, 38, 44, 42, 52, 46, 48, 50, 80,
+  // 21 the Warden, sectors 06-10, 41 Warden Prime
+  90, 34, 36, 38, 40, 30, 34, 40, 36, 60, 40, 46, 34, 44, 48, 38, 44, 44, 60, 90, 140,
+];
 
 export const GRAZE_POINTS = 50;
 export const FRAGMENT_POINTS = 750;

@@ -1,5 +1,7 @@
 import type { MenuScreen } from '../App';
 import type { Game } from '../game/engine';
+import { ACHIEVEMENTS } from '../game/achievements';
+import { LEVEL_COUNT } from '../game/levels';
 import { describeMutators, dailyPlan } from '../game/modes';
 import { todayKey } from '../game/profile';
 import { fmtScore } from '../game/score';
@@ -28,11 +30,11 @@ export function Title({ snap, game, onMenu }: { snap: Snapshot; game: Game; onMe
       <div className="menu">
         <Btn game={game} primary onClick={() => void game.startRun('run')}>
           JACK IN
-          <small>THE RUN · 20 SECTORS</small>
+          <small>THE RUN · 41 LEVELS · TWO WARDENS</small>
         </Btn>
         <Btn game={game} onClick={() => onMenu('practice')}>
           PRACTICE
-          <small>{p.sectorsUnlocked >= 5 ? 'ALL SECTORS OPEN' : `${p.sectorsUnlocked} OF 5 SECTORS OPEN`}</small>
+          <small>{p.sectorsUnlocked >= 10 ? 'ALL SECTORS OPEN' : `${p.sectorsUnlocked} OF 10 SECTORS OPEN`}</small>
         </Btn>
         <Btn game={game} onClick={() => void game.startRun('daily')}>
           DAILY TWIST
@@ -59,7 +61,7 @@ export function Title({ snap, game, onMenu }: { snap: Snapshot; game: Game; onMe
         {p.bestScore > 0 && <span>HIGH SCORE · {fmtScore(p.bestScore)}</span>}
         {p.bestTime !== null && <span>FASTEST CLEAR · {fmtTime(p.bestTime)}</span>}
         <span>
-          {p.achievements.length}/19 ACHIEVEMENTS · {p.fragments.length}/20 FRAGMENTS
+          {p.achievements.length}/{ACHIEVEMENTS.length} ACHIEVEMENTS · {p.fragments.length}/{LEVEL_COUNT} FRAGMENTS
         </span>
       </div>
     </div>

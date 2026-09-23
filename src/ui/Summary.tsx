@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Game } from '../game/engine';
-import { LEVEL_COUNT } from '../game/levels';
+import { LEVEL_COUNT, tabOf } from '../game/levels';
 import { describeMutators } from '../game/modes';
 import { RANK_COLOR, fmtScore } from '../game/score';
 import { DAILY_LINES, ENDING_LINES, OVERDRIVE_LINES } from '../game/story';
@@ -63,7 +63,7 @@ export function WonScreen({ snap, game }: { snap: Snapshot; game: Game }) {
   const p = snap.profile;
   const lines = snap.mode === 'overdrive' ? OVERDRIVE_LINES : snap.mode === 'daily' ? DAILY_LINES : snap.mode === 'practice' ? [] : ENDING_LINES;
   const practice = snap.mode === 'practice';
-  const nextOk = practice && snap.level < LEVEL_COUNT && Math.floor(snap.level / 4) + 1 <= p.sectorsUnlocked;
+  const nextOk = practice && snap.level < LEVEL_COUNT && tabOf(snap.level + 1) + 1 <= p.sectorsUnlocked;
   return (
     <div className="overlay won" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
       <div className="won-kicker">{practice ? `PRACTICE · LEVEL ${pad2(snap.level)} CLEARED` : snap.mode === 'daily' ? `DAILY TWIST ${snap.dailyKey} · CLEARED` : snap.mode === 'overdrive' ? 'OVERDRIVE · CLEARED' : 'RUN COMPLETE'}</div>
@@ -166,8 +166,14 @@ export function OverScreen({ snap, game }: { snap: Snapshot; game: Game }) {
       {snap.mutators && describeMutators(snap.mutators)[0] !== 'STANDARD' && <div className="mut-line">{describeMutators(snap.mutators).join(' · ')}</div>}
       {snap.results.length > 0 && <ResultsTable snap={snap} />}
       <div className="menu-row">
-        <Btn game={game} primary onClick={() => void game.runAgain()}>
-          RUN AGAIN
+        {snap.checkpoint && (
+          <Btn game={game} primary onClick={() => void game.respawnCheckpoint()}>
+            RESPAWN AT LEVEL 22
+            <small>KEEP THIS RUN · THE CHECKPOINT THE WARDEN LEFT</small>
+          </Btn>
+        )}
+        <Btn game={game} primary={!snap.checkpoint} onClick={() => void game.runAgain()}>
+          {snap.checkpoint ? 'RESTART FROM LEVEL 01' : 'RUN AGAIN'}
         </Btn>
         <CopyButton game={game} />
         <Btn game={game} className="small" onClick={() => game.quitToTitle()}>
