@@ -185,7 +185,15 @@ export interface Snapshot {
   newRecords: string[];
   /** the main run was cleared for the first time this session */
   firstClear: boolean;
-  boss: { hp: number; maxHp: number; phase: number; dead: boolean } | null;
+  boss: {
+    hp: number;
+    maxHp: number;
+    phase: number;
+    dead: boolean;
+    stage: 'intro' | 'survive' | 'warn' | 'breach' | 'respite' | 'dead';
+    /** seconds left in the survive window */
+    timeLeft: number;
+  } | null;
   /** big centre text during boss fights (SURVIVE, PHASE II, WARDEN OFFLINE) */
   bossBanner: string;
   /** the Warden fell this run: the over screen may offer a respawn at level 22 */

@@ -55,6 +55,26 @@ export function Hud({ snap, muted }: { snap: Snapshot; muted: boolean }) {
                 ))}
               </span>
               <span className="boss-phase">{boss.dead ? 'OFFLINE' : `PHASE ${PHASES[boss.phase - 1] ?? boss.phase}`}</span>
+              {!boss.dead && (
+                <span className={`boss-stage stage-${boss.stage}`}>
+                  {boss.stage === 'survive' ? (
+                    <>
+                      SURVIVE <b className="mono">{Math.ceil(boss.timeLeft)}</b>
+                      <span className="survive-bar">
+                        <span className="survive-fill" style={{ width: `${(boss.timeLeft / 30) * 100}%` }} />
+                      </span>
+                    </>
+                  ) : boss.stage === 'warn' ? (
+                    'SPIRAL INBOUND'
+                  ) : boss.stage === 'breach' ? (
+                    'BREACH THE CORE'
+                  ) : boss.stage === 'intro' ? (
+                    'STANDBY'
+                  ) : (
+                    'REBOOTING DEFENCES'
+                  )}
+                </span>
+              )}
             </div>
           )}
           {z && info && (

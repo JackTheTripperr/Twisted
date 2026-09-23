@@ -8,8 +8,8 @@
 import type { BeatInfo } from '../audio/engine';
 import type { Course } from '../game/courses';
 import { PLAY } from '../game/courses';
-import type { Clock, Obstacle, Ring as GapRing } from '../game/entities';
-import { pointAlong } from '../game/entities';
+import type { BossState, Clock, Obstacle, Ring as GapRing } from '../game/entities';
+import { BOSS_SPIRAL_FADE, pointAlong } from '../game/entities';
 import type { Zone } from '../game/levels';
 import { MODIFIER_INFO } from '../game/levels';
 import type { GateState, Phase, Segment, Vec, ZoneDef, ZoneState } from '../game/types';
@@ -1466,9 +1466,11 @@ export class Renderer {
       this.label(g, 'OFFLINE', cx, cy, 10, '#ffffff', 0.6, 5);
     }
     g.restore();
-    // everything it throws
-    for (const s2 of o.caps) this.bar(g, s2, RED);
-    this.drawGapRings(g, o.rings, RED, 720);
+    // the box, the falling bars, the laser and the spiral
+    for (const s2 of b.boxCaps) this.bar(g, s2, RED);
+    for (const p of b.projectiles) if (p.kind === 'bar') this.bar(g, { x1: p.x - p.len, y1: p.y, x2: p.x + p.len, y2: p.y, ht: p.r }, RED);
+    this.drawBossLaser(g, b);
+    this.drawBossSpiral(g, b, beat);
     for (const p of b.projectiles) {
       if (p.kind === 'seeker') this.drawHunter(g, p, p.r, p.trail, 1, RED);
       else if (p.kind === 'bolt') {
@@ -1519,6 +1521,116 @@ export class Renderer {
       g.restore();
       this.label(g, 'BREACH', x, y + 26, 8, '#ffffff', 0.85, 3);
     }
+  }
+
+  /** The Warden's laser: a flickering dashed guide while it charges, a hot beam once it is lethal. */
+  private drawBossLaser(g: CanvasRenderingContext2D, b: BossState) {
+    if (!b.laserCaps.length || b.laserFade <= 0) return;
+    const live = b.laserFade >= 1 && b.stage === 'survive';
+    const k = b.laserFade;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    for (const s2 of b.laserCaps) {
+      g.beginPath();
+      g.moveTo(s2.x1, s2.y1);
+      g.lineTo(s2.x2, s2.y2);
+      if (live) {
+        const grad = g.createLinearGradient(s2.x1, s2.y1, s2.x2, s2.y2);
+        grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+        grad.addColorStop(0.18, rgba(RED, 0.95));
+        grad.addColorStop(1, rgba(RED, 0.35));
+        g.strokeStyle = grad;
+        g.lineWidth = 24;
+        g.globalAlpha = 0.16;
+        g.stroke();
+        g.lineWidth = 6;
+        g.globalAlpha = 1;
+        g.stroke();
+        g.strokeStyle = 'rgba(255,255,255,0.85)';
+        g.lineWidth = 1.8;
+        g.stroke();
+      } else {
+        const flick = 0.55 + 0.45 * Math.abs(Math.sin(this.time * (14 + k * 30)));
+        g.strokeStyle = RED;
+        g.setLineDash([10, 8]);
+        g.lineDashOffset = -this.time * 90;
+        g.lineWidth = 1 + k * 3;
+        g.globalAlpha = (0.2 + 0.6 * k) * flick;
+        g.stroke();
+        g.setLineDash([]);
+      }
+    }
+    g.restore();
+    const o = b.origin;
+    if (live) this.disc(g, o.x, o.y, 8, '#ffffff', 0.9);
+    else this.disc(g, o.x, o.y, 3 + k * 7, RED, 0.4 + 0.6 * k * (0.6 + 0.4 * Math.sin(this.time * 30)));
+  }
+
+  /** The roaming spiral: its footprint and a countdown while it fades in, full neon once it is live. */
+  private drawBossSpiral(g: CanvasRenderingContext2D, b: BossState, beat: BeatInfo) {
+    const sp = b.spiral;
+    if (!sp || !b.spiralCaps.length) return;
+    const k = b.spiralFade;
+    const live = k >= 1;
+    const path = () => {
+      g.beginPath();
+      g.moveTo(b.spiralCaps[0].x1, b.spiralCaps[0].y1);
+      for (const c2 of b.spiralCaps) g.lineTo(c2.x2, c2.y2);
+    };
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    if (!live) {
+      const R = 22 + 11 * TAU * 2 + 8;
+      // hazard footprint: get out of this circle
+      g.globalCompositeOperation = 'lighter';
+      const tint = g.createRadialGradient(sp.cx, sp.cy, 0, sp.cx, sp.cy, R);
+      tint.addColorStop(0, rgba(RED, 0.04 + 0.1 * k));
+      tint.addColorStop(1, rgba(RED, 0.02 + 0.14 * k));
+      g.fillStyle = tint;
+      g.beginPath();
+      g.arc(sp.cx, sp.cy, R, 0, TAU);
+      g.fill();
+      g.strokeStyle = '#ffffff';
+      g.setLineDash([6, 10]);
+      g.lineDashOffset = this.time * 40;
+      g.lineWidth = 1.5;
+      g.globalAlpha = 0.3 + 0.5 * k * (0.6 + 0.4 * Math.sin(this.time * 12));
+      g.beginPath();
+      g.arc(sp.cx, sp.cy, R, 0, TAU);
+      g.stroke();
+      // a ghost of the arms, thickening as it materialises
+      g.setLineDash([4, 6]);
+      g.lineDashOffset = -this.time * 30;
+      g.strokeStyle = RED;
+      g.lineWidth = 2 + 6 * k;
+      g.globalAlpha = 0.15 + 0.5 * k;
+      path();
+      g.stroke();
+      g.restore();
+      const left = Math.max(1, Math.ceil((1 - k) * BOSS_SPIRAL_FADE));
+      this.label(g, String(left), sp.cx, sp.cy, 26, '#ffffff', 0.85, 2);
+      this.label(g, 'SPIRAL INBOUND', sp.cx, sp.cy - R - 12 < 110 ? sp.cy + R + 14 : sp.cy - R - 12, 9, '#ffffff', 0.8, 4);
+      return;
+    }
+    path();
+    g.globalCompositeOperation = 'lighter';
+    g.strokeStyle = RED;
+    g.globalAlpha = 0.16;
+    g.lineWidth = 30;
+    g.stroke();
+    g.globalAlpha = 0.35 + beat.kick * 0.2;
+    g.lineWidth = 16;
+    g.stroke();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    g.lineWidth = 10;
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.lineWidth = 3.6;
+    g.stroke();
+    g.restore();
   }
 
   private drawGapRings(g: CanvasRenderingContext2D, rings: GapRing[], color: string, fadeR: number) {

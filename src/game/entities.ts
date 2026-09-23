@@ -403,6 +403,16 @@ export interface Proj {
   trail: Vec[];
 }
 
+/** survive: the Warden attacks · warn: the spiral fades in (harmless) · breach: spiral live, core exposed · respite: after a hit */
+export type BossStage = 'survive' | 'warn' | 'breach' | 'respite' | 'dead';
+
+/** Seconds of survival per phase, when the laser starts charging, and how long each telegraph lasts. */
+export const BOSS_SURVIVE_T = 30;
+export const BOSS_LASER_AT = 15;
+export const BOSS_LASER_FADE = 2.2;
+export const BOSS_SPIRAL_FADE = 2.6;
+export const BOSS_RESPITE_T = 2.4;
+
 export interface BossState {
   hp: number;
   maxHp: number;
@@ -410,20 +420,68 @@ export interface BossState {
   dead: boolean;
   deadT: number;
   hitT: number;
+  stage: BossStage;
+  /** seconds into the current phase's survive window */
+  phaseT: number;
   phaseStartBeat: number;
   projectiles: Proj[];
-  spiral: { cx: number; cy: number; rot: number; t: number; alive: boolean; born: number } | null;
+  spiral: { cx: number; cy: number; rot: number; t: number } | null;
+  /** 0..1: the spiral is lethal only at 1 */
+  spiralFade: number;
+  spiralCaps: Segment[];
+  /** 0..1: the laser is lethal only at 1 */
+  laserFade: number;
+  laserCharging: boolean;
+  laserCaps: Segment[];
+  boxCaps: Segment[];
+  /** seconds since the spiral went live (for the fast-breach achievement) */
+  breachT: number;
+  /** one-shot cues the engine turns into banners and sound: 'laser' | 'spiral-warn' | 'spiral-live' | 'survive' */
+  events: string[];
   pickup: Vec | null;
   boxX: number;
   origin: Vec;
   laserAngle: number;
   lastBolt: number;
   lastBar: number;
-  lastRing: number;
   lastSeeker: number;
   blackout: number;
   wantPhantom: boolean;
   eye: number;
+}
+
+export interface BossPlan {
+  /** beats between aimed volleys */
+  boltEvery: number;
+  boltSpeed: number;
+  /** bolts per volley (odd) */
+  fan: number;
+  /** falling bars per drop (0, 1 or 2), every 8 beats */
+  bars: number;
+  barSpeed: number;
+  /** beats between seekers (0 = none) */
+  seekEvery: number;
+  /** laser beams from the 15 s mark (0, 1 or 2) */
+  laser: number;
+  blackout: number;
+  phantom: boolean;
+}
+
+/** Attack plan for each phase. No expanding rings: every threat is aimed, falls, or sweeps. */
+export function bossPlan(tier: number, phase: number): BossPlan {
+  const t1: BossPlan[] = [
+    { boltEvery: 2, boltSpeed: 240, fan: 1, bars: 1, barSpeed: 170, seekEvery: 0, laser: 0, blackout: 0, phantom: false },
+    { boltEvery: 1.5, boltSpeed: 270, fan: 1, bars: 2, barSpeed: 190, seekEvery: 0, laser: 1, blackout: 0, phantom: false },
+    { boltEvery: 2, boltSpeed: 290, fan: 3, bars: 2, barSpeed: 205, seekEvery: 8, laser: 1, blackout: 0, phantom: false },
+  ];
+  const t2: BossPlan[] = [
+    { boltEvery: 1.5, boltSpeed: 270, fan: 1, bars: 2, barSpeed: 190, seekEvery: 0, laser: 1, blackout: 0, phantom: false },
+    { boltEvery: 2, boltSpeed: 290, fan: 3, bars: 2, barSpeed: 205, seekEvery: 8, laser: 1, blackout: 0, phantom: false },
+    { boltEvery: 2, boltSpeed: 300, fan: 3, bars: 2, barSpeed: 215, seekEvery: 8, laser: 2, blackout: 0.7, phantom: false },
+    { boltEvery: 1.5, boltSpeed: 310, fan: 3, bars: 2, barSpeed: 225, seekEvery: 0, laser: 2, blackout: 0, phantom: true },
+  ];
+  const list = tier === 2 ? t2 : t1;
+  return list[Math.max(0, Math.min(list.length - 1, phase - 1))];
 }
 
 export interface Obstacle {
@@ -511,16 +569,25 @@ export function createObstacle(def: ObstacleDef): Obstacle {
       dead: false,
       deadT: 0,
       hitT: 0,
+      stage: 'survive',
+      phaseT: 0,
       phaseStartBeat: 0,
       projectiles: [],
       spiral: null,
+      spiralFade: 0,
+      spiralCaps: [],
+      laserFade: 0,
+      laserCharging: false,
+      laserCaps: [],
+      boxCaps: [],
+      breachT: 0,
+      events: [],
       pickup: null,
       boxX: def.box.x,
       origin: v(def.box.x + def.box.w / 2, def.box.y + def.box.h + 6),
       laserAngle: Math.PI / 2,
       lastBolt: -1,
       lastBar: -1,
-      lastRing: -1,
       lastSeeker: -1,
       blackout: 0,
       wantPhantom: false,
@@ -889,111 +956,152 @@ export function updateObstacle(o: Obstacle, c: Clock, ctx: SimContext) {
 
 // ----------------------------------------------------------------- boss
 
+/** Where the roaming spiral sits `t` seconds after it went live. Starts from the same spot every time. */
+function spiralPath(t: number, drift: number): Vec {
+  return v(640 + 320 * Math.sin(t * drift + 0.4), 440 + 80 * Math.sin(t * drift * 1.6 + 1.1));
+}
+
 function updateBoss(o: Obstacle, d: BossDef, c: Clock, ctx: SimContext) {
   const b = o.boss!;
   b.eye += c.dt;
-  // box (tier 2 slides along the top)
+  // box (Warden Prime slides along the top)
   b.boxX = d.box.x + (d.tier === 2 && !b.dead ? Math.sin(c.beat * 0.28) * 260 : 0);
   const bx = b.boxX;
   const by = d.box.y;
   b.origin = v(bx + d.box.w / 2, by + d.box.h + 6);
-  o.caps.push(...box(bx, by, d.box.w, d.box.h, 5).map((s) => ({ ...s, tooth: true })));
+  b.boxCaps = box(bx, by, d.box.w, d.box.h, 5).map((s2) => ({ ...s2, tooth: true }));
+  b.laserCaps.length = 0;
+  b.spiralCaps.length = 0;
+  o.caps.push(...b.boxCaps);
   if (b.dead) {
+    b.stage = 'dead';
     b.deadT += c.dt;
     b.projectiles.length = 0;
     b.spiral = null;
     b.pickup = null;
+    b.spiralFade = 0;
+    b.laserFade = 0;
     b.blackout = Math.max(0, b.blackout - c.dt);
+    b.wantPhantom = false;
     return;
   }
   if (!ctx.live) return;
   const tier = d.tier;
   const ph = b.phase;
+  const plan = bossPlan(tier, ph);
+
+  // ---- respite after a hit: nothing fires, the next phase starts when it ends
+  if (b.hitT > 0) {
+    b.stage = 'respite';
+    b.hitT -= c.dt;
+    b.laserFade = Math.max(0, b.laserFade - c.dt * 2);
+    b.blackout = Math.max(0, b.blackout - c.dt * 2);
+    b.wantPhantom = false;
+    stepProjectiles(b.projectiles, c, ctx, o.caps, o.discs);
+    if (b.hitT <= 0) {
+      b.phaseT = 0;
+      b.phaseStartBeat = c.beat;
+      b.lastBolt = -1;
+      b.lastBar = -1;
+      b.lastSeeker = -1;
+      b.laserCharging = false;
+      b.events.push('survive');
+    }
+    return;
+  }
+
+  b.phaseT += c.dt;
   const pb = c.beat - b.phaseStartBeat;
-  const respite = b.hitT > 0;
-  if (respite) b.hitT -= c.dt;
+  const surviving = b.phaseT < BOSS_SURVIVE_T;
 
-  // attack cadence per phase
-  const boltEvery = tier === 1 ? [2, 1.5, 1][ph - 1] ?? 1 : [1.5, 1, 0.75, 0.5][ph - 1] ?? 0.5;
-  const barEvery = 8;
-  const ringEvery = 4;
-  const seekEvery = 6;
-  const boltSpeed = (tier === 1 ? 200 : 240) + 50 * ph;
-  const fan = tier === 1 ? (ph >= 3 ? 3 : 1) : ph >= 2 ? 3 : 1;
-  const wantRings = tier === 1 ? ph >= 2 : true;
-  const wantSeekers = tier === 1 ? ph >= 3 : ph >= 2;
-  const wantLaser = tier === 1 ? ph >= 2 : true;
-
-  if (!respite && pb > 1) {
-    const kb = Math.floor(pb / boltEvery);
-    if (kb > b.lastBolt) {
-      b.lastBolt = kb;
-      const dx = ctx.cursor.x - b.origin.x;
-      const dy = ctx.cursor.y - b.origin.y;
-      const base = Math.atan2(dy, dx);
-      for (let i = 0; i < fan; i++) {
-        const a = base + ((i - (fan - 1) / 2) * 13 * Math.PI) / 180;
-        b.projectiles.push({ kind: 'bolt', x: b.origin.x, y: b.origin.y, vx: Math.cos(a) * boltSpeed, vy: Math.sin(a) * boltSpeed, r: 9, life: 6, len: 0, trail: [] });
+  if (surviving) {
+    b.stage = 'survive';
+    // ---- aimed volleys (a two-beat grace at the start of every phase)
+    if (pb > 2) {
+      const kb = Math.floor(pb / plan.boltEvery);
+      if (kb > b.lastBolt) {
+        b.lastBolt = kb;
+        const base = Math.atan2(ctx.cursor.y - b.origin.y, ctx.cursor.x - b.origin.x);
+        for (let i = 0; i < plan.fan; i++) {
+          const a = base + ((i - (plan.fan - 1) / 2) * 13 * Math.PI) / 180;
+          b.projectiles.push({ kind: 'bolt', x: b.origin.x, y: b.origin.y, vx: Math.cos(a) * plan.boltSpeed, vy: Math.sin(a) * plan.boltSpeed, r: 9, life: 6, len: 0, trail: [] });
+        }
       }
     }
-    const kbar = Math.floor(pb / barEvery);
-    if (kbar > b.lastBar && pb > 3) {
-      b.lastBar = kbar;
-      const speed = 150 + 30 * ph;
-      const half = 55 + 12 * ph;
-      const xs = ph >= 2 || tier === 2 ? [b.origin.x - 230, b.origin.x + 230] : [b.origin.x];
-      for (const x of xs) b.projectiles.push({ kind: 'bar', x, y: b.origin.y, vx: 0, vy: speed, r: 6, life: 8, len: half, trail: [] });
+    // ---- falling bars
+    if (plan.bars > 0 && pb > 3) {
+      const kbar = Math.floor(pb / 8);
+      if (kbar > b.lastBar) {
+        b.lastBar = kbar;
+        const half = 55 + 10 * ph;
+        const xs = plan.bars >= 2 ? [b.origin.x - 230, b.origin.x + 230] : [b.origin.x];
+        for (const x of xs) b.projectiles.push({ kind: 'bar', x, y: b.origin.y, vx: 0, vy: plan.barSpeed, r: 6, life: 8, len: half, trail: [] });
+      }
     }
-    if (wantSeekers) {
-      const ks = Math.floor(pb / seekEvery);
-      if (ks > b.lastSeeker && pb > 4) {
+    // ---- seekers
+    if (plan.seekEvery > 0 && pb > 4) {
+      const ks = Math.floor(pb / plan.seekEvery);
+      if (ks > b.lastSeeker) {
         b.lastSeeker = ks;
         const vmax = 120 + 20 * ph;
         b.projectiles.push({ kind: 'seeker', x: b.origin.x, y: b.origin.y, vx: 0, vy: vmax, r: 10, life: 6, len: 0, trail: [] });
       }
     }
-  }
-  // rings are derived analytically from their launch beats within the phase
-  if (wantRings && !respite) {
-    const ringSpeed = 170 + 30 * ph;
-    for (let k = Math.floor(pb / ringEvery); k >= 0; k--) {
-      const launch = k * ringEvery;
-      if (launch <= 2) continue;
-      const age = pb - launch;
-      const R = age * (ringSpeed / 2.1);
-      if (R <= 0) continue;
-      if (R > 720) break;
-      o.rings.push({ x: b.origin.x, y: b.origin.y, R, gapA: age * 0.6 + k, gaps: 3, gapHalf: 0.34, ht: 4 });
+    // ---- laser: charges (harmless) from the 15 s mark, lethal once fully charged
+    if (plan.laser > 0 && b.phaseT >= BOSS_LASER_AT) {
+      if (!b.laserCharging) {
+        b.laserCharging = true;
+        b.events.push('laser');
+      }
+      b.laserFade = Math.min(1, (b.phaseT - BOSS_LASER_AT) / BOSS_LASER_FADE);
     }
-  }
-  stepProjectiles(b.projectiles, c, ctx, o.caps, o.discs);
-  // laser
-  if (wantLaser && !respite) {
-    const s = 0.5 - 0.5 * Math.cos(TAU * (0.28 + 0.05 * ph) * c.bars);
-    b.laserAngle = ((30 + 120 * s) * Math.PI) / 180;
-    const len = 540;
-    const beams = tier === 2 && ph >= 3 ? [b.laserAngle, Math.PI - b.laserAngle] : [b.laserAngle];
-    for (const a of beams) o.caps.push(cap(b.origin, v(b.origin.x + Math.cos(a) * len, b.origin.y + Math.sin(a) * len), 3));
-  }
-  // the roaming spiral with the weak point at its centre
-  if (!respite && !b.spiral && pb >= 6) {
-    b.spiral = { cx: b.origin.x, cy: 430, rot: 0, t: 0, alive: true, born: c.beat };
-  }
-  if (b.spiral) {
+    b.blackout += (plan.blackout - b.blackout) * Math.min(1, c.dt * 2);
+    b.wantPhantom = plan.phantom;
+  } else {
+    // ---- the survive window is over: the Warden stops firing and the spiral fades in
+    b.wantPhantom = false;
+    b.blackout = Math.max(0, b.blackout - c.dt * 1.5);
+    b.laserFade = Math.max(0, b.laserFade - c.dt * 1.6);
+    if (!b.spiral) {
+      const p0 = spiralPath(0, 0);
+      b.spiral = { cx: p0.x, cy: p0.y, rot: 0, t: 0 };
+      b.spiralFade = 0;
+      b.breachT = 0;
+      b.events.push('spiral-warn');
+      // anything still hunting the player burns out
+      for (const p of b.projectiles) if (p.kind === 'seeker') p.life = Math.min(p.life, 0.35);
+    }
     const sp = b.spiral;
-    sp.t += c.dt;
-    const drift = 0.22 + 0.05 * ph;
-    sp.cx = 640 + 320 * Math.sin(sp.t * drift + 0.4);
-    sp.cy = 430 + 120 * Math.sin(sp.t * drift * 1.6 + 1.1);
+    const wasLive = b.spiralFade >= 1;
+    b.spiralFade = Math.min(1, b.spiralFade + c.dt / BOSS_SPIRAL_FADE);
+    if (!wasLive && b.spiralFade >= 1) b.events.push('spiral-live');
+    const live = b.spiralFade >= 1;
+    b.stage = live ? 'breach' : 'warn';
+    // it only starts roaming once it is live, so the telegraph shows exactly where it will be
+    const drift = (0.22 + 0.04 * ph) * (tier === 2 ? 1.15 : 1);
+    if (live) {
+      sp.t += c.dt;
+      b.breachT += c.dt;
+    }
+    const pos = spiralPath(sp.t, drift);
+    sp.cx = pos.x;
+    sp.cy = pos.y;
     sp.rot += c.dt * (1.5 + 0.35 * ph) * (tier === 2 ? 1.2 : 1);
-    spiralCaps(o.caps, v(sp.cx, sp.cy), 22, 11, 2, sp.rot, 5);
-    b.pickup = v(sp.cx, sp.cy);
-  } else b.pickup = null;
-  // tier 2 extras
-  if (tier === 2) {
-    const target = ph >= 3 ? 1 : 0;
-    b.blackout += (target - b.blackout) * Math.min(1, c.dt * 2);
-    b.wantPhantom = ph >= 4;
+    spiralCaps(b.spiralCaps, v(sp.cx, sp.cy), 22, 11, 2, sp.rot, 5);
+    if (live) o.caps.push(...b.spiralCaps);
+  }
+  b.pickup = b.spiral && b.spiralFade >= 1 ? v(b.spiral.cx, b.spiral.cy) : null;
+
+  stepProjectiles(b.projectiles, c, ctx, o.caps, o.discs);
+
+  // ---- laser geometry (drawn while charging, lethal only when charged and still in the survive window)
+  if (plan.laser > 0 && b.laserFade > 0) {
+    const sw = 0.5 - 0.5 * Math.cos(TAU * (0.28 + 0.05 * ph) * c.bars);
+    b.laserAngle = ((30 + 120 * sw) * Math.PI) / 180;
+    const len = 560;
+    const beams = plan.laser >= 2 ? [b.laserAngle, Math.PI - b.laserAngle] : [b.laserAngle];
+    for (const a of beams) b.laserCaps.push(cap(b.origin, v(b.origin.x + Math.cos(a) * len, b.origin.y + Math.sin(a) * len), 3));
+    if (surviving && b.laserFade >= 1) o.caps.push(...b.laserCaps);
   }
 }
 
@@ -1003,19 +1111,21 @@ export function damageBoss(o: Obstacle, beat: number): boolean {
   b.hp--;
   b.spiral = null;
   b.pickup = null;
+  b.spiralFade = 0;
+  b.laserFade = 0;
+  b.laserCharging = false;
   b.projectiles.length = 0;
-  b.hitT = 2.2;
-  b.lastBolt = -1;
-  b.lastBar = -1;
-  b.lastRing = -1;
-  b.lastSeeker = -1;
-  b.phaseStartBeat = beat + 2.2;
+  b.hitT = BOSS_RESPITE_T;
+  b.phaseStartBeat = beat;
+  b.wantPhantom = false;
   if (b.hp <= 0) {
     b.dead = true;
     b.deadT = 0;
+    b.stage = 'dead';
     return true;
   }
   b.phase++;
+  b.stage = 'respite';
   return false;
 }
 

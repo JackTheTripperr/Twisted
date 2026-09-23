@@ -1618,3 +1618,51 @@ body,
     transform: scale(1.06);
   }
 }
+
+/* ------------------------------------------------------------ v5: boss stages */
+
+.boss-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: rgba(255, 255, 255, 0.85);
+}
+.boss-stage b {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: #fff;
+  min-width: 20px;
+  text-align: right;
+}
+.survive-bar {
+  width: 70px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.survive-fill {
+  display: block;
+  height: 100%;
+  background: #ff2d55;
+  box-shadow: 0 0 8px #ff2d55;
+  transition: width 0.15s linear;
+}
+.boss-stage.stage-warn {
+  color: #fff;
+  animation: blink 0.35s steps(2, start) infinite;
+}
+.boss-stage.stage-breach {
+  color: #fff;
+  text-shadow:
+    0 0 8px #fff,
+    0 0 16px #ff2d55;
+}
+.boss-stage.stage-respite,
+.boss-stage.stage-intro {
+  color: rgba(255, 255, 255, 0.5);
+}

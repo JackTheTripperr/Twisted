@@ -70,7 +70,7 @@ emoji grid.
 
 The profile (saved in this browser) tracks runs, deaths, deepest level, high
 score, fastest clear, grazes, max combo, fragments, per-level bests, run
-history, the daily best, and 19 **achievements** that pop as toasts in play.
+history, the daily best, and 23 **achievements** that pop as toasts in play.
 **Options** cover mouse sensitivity, music and SFX volume, screen shake, full or
 reduced flashing, scanlines, and the best-run ghost.
 
@@ -103,7 +103,7 @@ across the sectors, so everything gets faster as the soundtrack escalates.
 | 18 | TOTAL RECALL | Everything at once inside a corridor that **breathes** with the kick. |
 | 19 | CORE MELTDOWN | The reactor: a three-arm spinner around the goal, rings from the centre, corner lasers, a TURBO gate with a decaying signal. |
 | 20 | ANNIHILATION | Collapsing S-corridor, seekers, spinners, doors, two gates. Reboot core #4. |
-| 21 | THE WARDEN | Boss. **SURVIVE** while it launches bolts, bars, rings and seekers from its box; grab the breach core at the centre of the roaming spiral three times. Writes the checkpoint. |
+| 21 | THE WARDEN | Boss. Three phases of **SURVIVE** for 30 s against aimed bolts, falling bars, seekers and a charging laser, then breach the core inside a roaming spiral. Writes the checkpoint. |
 | 22 | AFTERSHOCK | **Turrets** that lead your movement; pillars block their bolts. |
 | 23 | LATTICE | A **laser lattice** whose beam groups cycle on the beat. |
 | 24 | UNDERTOW | **Currents** that push against you, plus pistons and doors. |
@@ -123,7 +123,7 @@ across the sectors, so everything gets faster as the soundtrack escalates.
 | 38 | ENDGAME I | Lattice, doors, turrets and a crush wall in one corridor. |
 | 39 | ENDGAME II | Twin spirals and a vertical serpent inside a shrinking room. |
 | 40 | ENDGAME III | The final hallway: mines, a pendulum, a turret, gates, doors, a serpent, a crush wall. Reboot core #8. |
-| 41 | WARDEN PRIME | Final boss: four breach cores, a sliding box, twin lasers, a blackout phase and a phantom. |
+| 41 | WARDEN PRIME | Final boss: four phases on the same rules, a sliding box, twin lasers, a blackout phase and a phantom. |
 
 ### Gates
 
@@ -155,13 +155,25 @@ that keeps your score and results.
 
 ### The Warden fights
 
-Levels 21 and 41 are boss arenas. The Warden sits in a box at the top of the
-room and launches aimed bolts, falling bars, gapped rings, seekers and a laser.
-Every few bars it drops a **roaming spiral**; the glowing **breach core** at its
-centre is the Warden's weak point. Grab it and a lightning arc strips one shell
-off the box, the arena clears for a breath, and the next, harder phase begins.
-Three hits end the Warden; Warden Prime takes four, slides its box along the
-top, fires twin lasers, blacks out the room and releases a phantom.
+Levels 21 and 41 are boss arenas, and every phase follows the same rules:
+
+1. **Survive** for 30 seconds. The Warden fires aimed bolts, drops falling bars
+   and, in later phases, releases seekers. There are no expanding rings.
+2. At the 15-second mark of phase 2 onwards, its **laser charges**: a dashed,
+   harmless guide that thickens and flickers for about two seconds before the
+   beam turns lethal and starts sweeping.
+3. At 30 seconds the Warden **stops firing**, the laser powers down, and a
+   **spiral fades in** where it is about to appear: a dashed footprint, ghosted
+   arms and a countdown. It is harmless until the countdown ends.
+4. Once live, the spiral roams and rotates with the glowing **breach core** at its
+   centre. Grab it and a lightning arc strips one shell off the Warden's box.
+   After a short respite the next, harder phase begins.
+
+The Warden takes three hits. Warden Prime takes four, slides its box along the
+top, charges twin lasers in its later phases, blacks out the room in phase 3 and
+releases a phantom in phase 4. Its blackout and phantom only last through the
+survive windows, never the spiral. The HUD shows the phase, the survive
+countdown and what is coming next.
 
 ## Story
 
@@ -176,7 +188,16 @@ has something to say about every way you die.
 ## Audio
 
 There are no audio files. `src/audio/engine.ts` is a fully procedural Web Audio
-synthwave engine with a dark, bass-heavy mix: a deep saturated kick with its own
+synthwave engine with four original songs:
+
+| Song | Plays on | Character |
+| --- | --- | --- |
+| **Inversion** | Title, levels 1–20, the win screen | A minor, described below. |
+| **Deep Field** | Levels 22–40 | D minor, swung hats, a galloping octave bass, three-against-four plucks, brass stabs, a portamento lead and a half-time lift every fourth phrase. |
+| **The Warden** | Level 21 | E Phrygian at 150 BPM: a grinding riff on the flat second, alarm arps, a siren lead that bends into every note, and toms. It follows the fight: a heartbeat intro, new layers each phase, and a thinned-out tension mix while the spiral is up. |
+| **Warden Prime** | Level 41 | C minor at 156 BPM: a vowel-formant choir, an 808 sub, trap hat rolls, a half-time backbeat, orchestral hits and a supersaw theme, also layered by phase. |
+
+Inversion, the first-half theme, has a dark, bass-heavy mix: a deep saturated kick with its own
 sub layer, dark claps, 16th-note hats, a reese-style detuned octave bass over a
 fat sine sub with three alternating patterns, side-chained pads with a triangle
 body and a sub drone two octaves down, a mid-register arp and a sparse vibrato

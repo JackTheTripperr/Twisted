@@ -127,8 +127,8 @@ function l26(): Course {
   return {
     walls: [...frame(), ...lane(150, 618)],
     obstacles: [
-      { kind: 'serpent', from: v(L, 300), to: v(R, 300), amp: 90, wavelength: 260, speed: 110, segments: 14, segR: 12, spacing: 22 },
-      { kind: 'serpent', from: v(R, 470), to: v(L, 470), amp: 90, wavelength: 300, speed: 95, segments: 14, segR: 12, spacing: 22, phase: 0.5 },
+      { kind: 'serpent', from: v(260, 300), to: v(R, 300), amp: 90, wavelength: 260, speed: 110, segments: 14, segR: 12, spacing: 22 },
+      { kind: 'serpent', from: v(R, 470), to: v(260, 470), amp: 90, wavelength: 300, speed: 95, segments: 14, segR: 12, spacing: 22, phase: 0.5 },
     ],
     zones: [],
     fragment: v(640, CY),
@@ -214,7 +214,7 @@ function l31(): Course {
     walls: [...frame(), ...lane(150, 618), ...box(500, 300, 40, 168), ...box(800, 300, 40, 168)],
     obstacles: [
       turret(300, 170, 2.5, 250),
-      turret(300, 598, 2.5, 250, 0.5),
+      turret(300, 598, 2.5, 250, 0),
       turret(1000, 170, 2, 270, 0.25),
       { kind: 'sweeper', pivot: v(640, 150), length: 500, a0: 40, a1: 140, speed: 0.3, t: 6 },
     ],
@@ -266,7 +266,7 @@ function l33(): Course {
       door(940, 150, 618, 4, 0.6, 0),
     ],
     zones: [],
-    fragment: v(500, CY),
+    fragment: v(590, CY),
     start: v(130, CY),
     goal: v(1170, CY),
     goalR: 24,
@@ -314,7 +314,7 @@ function l35(): Course {
     ],
     zones: [],
     pickup: v(410, 384),
-    fragment: v(1000, 620),
+    fragment: v(550, 540),
     start: v(130, 200),
     goal: v(1170, 568),
     goalR: 24,

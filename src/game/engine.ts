@@ -2,7 +2,7 @@ import { AudioEngine, type BeatInfo } from '../audio/engine';
 import { CLEAR_T, DEATH_T, PRACTICE_T, REBOOT_T, Renderer, type GameView, type PhantomView, type PurgeView } from '../render/renderer';
 import { ACHIEVEMENT_BY_ID } from './achievements';
 import { getCourse, PLAY, type Course } from './courses';
-import { createObstacle, damageBoss, fieldPull, hitsObstacle, nearDynamic, nearestSurface, updateObstacle, type Clock, type Obstacle } from './entities';
+import { BOSS_SURVIVE_T, createObstacle, damageBoss, fieldPull, hitsObstacle, nearDynamic, nearestSurface, updateObstacle, type Clock, type Obstacle } from './entities';
 import { Input } from './input';
 import { CHECKPOINT_LEVEL, LEVELS, LEVEL_COUNT, MAX_REBOOTS, ZONES, tabOf, type LevelDef, type Zone } from './levels';
 import { collides, distToSegment } from './maze';
@@ -283,7 +283,16 @@ export class Game implements GameView {
       dailyKey: this.dailyKey,
       newRecords: this.newRecords,
       firstClear: this.firstClear,
-      boss: bs ? { hp: bs.hp, maxHp: bs.maxHp, phase: bs.phase, dead: bs.dead } : null,
+      boss: bs
+        ? {
+            hp: bs.hp,
+            maxHp: bs.maxHp,
+            phase: bs.phase,
+            dead: bs.dead,
+            stage: this.phase === 'intro' ? 'intro' : bs.stage,
+            timeLeft: Math.max(0, BOSS_SURVIVE_T - bs.phaseT),
+          }
+        : null,
       bossBanner: this.bossBanner,
       checkpoint: this.checkpoint && (this.mode === 'run' || this.mode === 'overdrive'),
     };
@@ -417,6 +426,41 @@ export class Game implements GameView {
     this.publish();
   }
 
+  /** Turn the boss's one-shot cues into banners, sound and effects, and keep the music in step with the fight. */
+  private drainBossCues() {
+    const o = this.boss;
+    const b = o?.boss;
+    if (!b) {
+      this.audio.setBoss(0, 'none');
+      return;
+    }
+    const musicPhase = this.phase === 'intro' || this.phase === 'title' ? 0 : b.phase;
+    this.audio.setBoss(musicPhase, this.phase === 'intro' ? 'intro' : b.stage);
+    if (!b.events.length) return;
+    const cues = b.events.splice(0);
+    if (this.phase !== 'playing') return;
+    for (const cue of cues) {
+      if (cue === 'laser') {
+        this.audio.sfxLaserCharge();
+        this.renderer.ring(b.origin.x, b.origin.y, '#ff2d55', 300, 3, 160);
+      } else if (cue === 'spiral-warn') {
+        this.audio.sfxSpiralWarn();
+        this.showBanner('INCOMING', 1.8, false);
+        if (b.spiral) this.renderer.ring(b.spiral.cx, b.spiral.cy, '#ffffff', 260, 2, 190);
+      } else if (cue === 'spiral-live') {
+        this.audio.sfxBreach();
+        this.showBanner('BREACH', 1.6, false);
+        if (b.spiral) {
+          this.renderer.ring(b.spiral.cx, b.spiral.cy, '#ff2d55', 700, 5, 420);
+          this.renderer.burst(b.spiral.cx, b.spiral.cy, ['#ffffff', '#ff2d55'], 40);
+        }
+        this.renderer.shake(0.35);
+      } else if (cue === 'survive') {
+        this.showBanner('SURVIVE', 2.2, true);
+      }
+    }
+  }
+
   /** The player grabbed the weak point riding in the Warden's spiral. */
   private hitBoss() {
     const o = this.boss!;
@@ -444,12 +488,13 @@ export class Game implements GameView {
       this.showBanner('WARDEN OFFLINE', 3, false);
       const tier = (o.def as { tier: number }).tier;
       this.unlock(tier === 2 ? 'warden_prime' : 'warden_down');
-      if (this.levelT < 60) this.unlock('untouched_boss');
+      if (b.breachT < 4) this.unlock('untouched_boss');
       if (tier === 1 && (this.mode === 'run' || this.mode === 'overdrive')) this.checkpoint = true;
     } else {
       this.levelScore += 800;
+      if (b.breachT < 4) this.unlock('untouched_boss');
       this.renderer.floatText(pk.x, pk.y - 30, 'WARDEN HIT +800', '#ffffff', 18);
-      this.showBanner(`PHASE ${BOSS_PHASES[b.phase - 1] ?? b.phase}`, 2.2, true);
+      this.showBanner(`PHASE ${BOSS_PHASES[b.phase - 1] ?? b.phase}`, 2.1, true);
     }
     this.publish();
   }
@@ -613,7 +658,7 @@ export class Game implements GameView {
     this.ghostPos = null;
     this.renderer.setLevel(this.course.walls, this.course.start, this.zone);
     this.renderer.ring(this.course.start.x, this.course.start.y, this.zone.primary, 300, 3, 200);
-    this.audio.setMode('full', n, this.zone.bpm);
+    this.audio.setMode('full', n, n === 41 ? 156 : this.zone.bpm);
     this.audio.setDrone(0);
     this.audio.setRumble(0);
     if (this.mode === 'run' && n > this.profile.bestLevel) {
@@ -953,6 +998,7 @@ export class Game implements GameView {
     s.setProperty('--surge', (this.surge / SURGE_MAX).toFixed(3));
     s.setProperty('--combo', (this.comboT / COMBO_WINDOW).toFixed(3));
     this.renderer.frame(this, beat, dt, dt * this.timeScale);
+    this.drainBossCues();
     if (this.bossBannerT > 0) {
       this.bossBannerT -= dt;
       if (this.bossBannerT <= 0) {
@@ -1195,6 +1241,12 @@ export class Game implements GameView {
           this.bossPhantom = true;
           this.phantom = { x: PLAY.x + 40, y: PLAY.y + PLAY.h - 40, r: this.def.cursorR + 2, alive: true, fade: 1, age: 0, trail: [], vx: 0, vy: 0 };
           this.renderer.ring(this.phantom.x, this.phantom.y, '#ff2d55', 500, 4, 400);
+        } else if (!bs.wantPhantom && this.bossPhantom) {
+          this.bossPhantom = false;
+          if (this.phantom) {
+            this.phantom.alive = false;
+            this.renderer.ring(this.phantom.x, this.phantom.y, '#ffffff', 400, 2, 200);
+          }
         }
       }
       const goalOpen = !this.boss || (this.boss.boss!.dead && this.boss.boss!.deadT > 1.2);
